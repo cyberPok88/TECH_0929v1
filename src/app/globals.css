@@ -1,0 +1,239 @@
+
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+
+  /* ─── Obsidiana (default, sin data-theme) ──────────────────────────────── */
+  :root {
+    --bg: 0.175 0.008 70;
+    --surface: 0.215 0.010 70;
+    --surface-2: 0.255 0.012 70;
+    --surface-raised: 0.28 0.012 70;
+    --surface-overlay: 0.30 0.012 70;
+    --hover-bg: 0.24 0.010 70;
+
+    --sidebar: 0.155 0.008 70;
+    --sidebar-foreground: 0.94 0.008 85;
+    --sidebar-hover: 0.225 0.010 70;
+
+    --fg: 0.94 0.008 85;
+    --muted-fg: 0.71 0.015 75;
+    
+    --border: 0.33 0.012 70;
+    
+    --primary: 0.79 0.125 80;
+    --primary-fg: 0.24 0.030 75;
+    --primary-bg: 0.30 0.050 80;
+    
+    --secondary: 0.70 0.10 260;
+    --secondary-fg: 0.98 0 0;
+    --secondary-bg: 0.28 0.040 260;
+    
+    --success: 0.74 0.13 160;
+    --success-bg: 0.25 0.05 160;
+    --warning: 0.77 0.14 60;
+    --warning-bg: 0.25 0.05 60;
+    --destructive: 0.70 0.16 32;
+    --destructive-bg: 0.25 0.05 32;
+    /* Texto sobre el relleno SÓLIDO destructivo — medido AA 5.77:1.
+       (Antes no existía: el mapping apuntaba a --fg y daba 2.40:1.) */
+    --destructive-fg: 0.24 0.030 75;
+    --info: 0.76 0.09 200;
+    --info-bg: 0.25 0.03 200;
+    
+    --chart-1: 0.70 0.15 160;
+    --chart-2: 0.70 0.15 60;
+    --chart-3: 0.70 0.15 200;
+    --chart-4: 0.70 0.15 320;
+    
+    --acc-sistema: 0.70 0.15 320;
+    --acc-catalogos: 0.70 0.15 75;
+    --acc-compras: 0.70 0.13 195;
+    --acc-inventario: 0.70 0.15 160;
+    --acc-entradas: 0.70 0.15 215;
+    
+    --radius: 6px;
+    --shadow: 0 1px 2px rgb(0 0 0/.45), 0 10px 28px rgb(0 0 0/.35);
+  }
+
+  /* ─── Turquesa ─────────────────────────────────────────────────────────── */
+  [data-theme="turquesa"] {
+    --bg: 0.185 0.020 212;
+    --surface: 0.225 0.024 212;
+    --surface-2: 0.265 0.026 212;
+    --surface-raised: 0.29 0.026 212;
+    --surface-overlay: 0.31 0.026 212;
+    --hover-bg: 0.25 0.024 212;
+
+    --sidebar: 0.165 0.020 212;
+    --sidebar-foreground: 0.94 0.008 200;
+    --sidebar-hover: 0.235 0.024 212;
+
+    --fg: 0.94 0.008 200;
+    --muted-fg: 0.71 0.030 208;
+    
+    --border: 0.335 0.026 212;
+    
+    --primary: 0.79 0.110 185;
+    --primary-fg: 0.22 0.035 212;
+    --primary-bg: 0.28 0.045 185;
+    
+    --secondary: 0.72 0.12 195;
+    --secondary-fg: 0.98 0 0;
+    --secondary-bg: 0.26 0.040 195;
+    
+    --success: 0.76 0.14 155;
+    --success-bg: 0.26 0.05 155;
+    --warning: 0.80 0.125 80;
+    --warning-bg: 0.26 0.05 80;
+    --destructive: 0.71 0.17 30;
+    --destructive-bg: 0.26 0.05 30;
+    --destructive-fg: 0.22 0.035 212;   /* medido AA 6.21:1 sobre el sólido */
+    --info: 0.77 0.09 235;
+    --info-bg: 0.26 0.03 235;
+    
+    --chart-1: 0.72 0.14 155;
+    --chart-2: 0.72 0.14 80;
+    --chart-3: 0.72 0.14 235;
+    --chart-4: 0.72 0.14 340;
+    
+    --acc-sistema: 0.72 0.14 340;
+    --acc-catalogos: 0.72 0.14 80;
+    --acc-compras: 0.72 0.13 190;
+    --acc-inventario: 0.72 0.14 155;
+    --acc-entradas: 0.72 0.14 235;
+    
+    --radius: 10px;
+    --shadow: 0 1px 2px rgb(0 0 0/.45), 0 10px 28px rgb(0 10 12/.35);
+  }
+
+  /* ─── Piedra Solar ──────────────────────────────────────────────────────── */
+  [data-theme="piedra"] {
+    --bg: 0.955 0.014 85;
+    --surface: 0.985 0.007 90;
+    --surface-2: 0.995 0.004 95;
+    --surface-raised: 1.0 0.003 95;
+    --surface-overlay: 1.0 0.002 95;
+    --hover-bg: 0.94 0.010 85;
+
+    --sidebar: 0.975 0.010 88;
+    --sidebar-foreground: 0.26 0.015 60;
+    --sidebar-hover: 0.935 0.012 85;
+
+    --fg: 0.26 0.015 60;
+    --muted-fg: 0.47 0.020 65;
+    
+    --border: 0.875 0.015 80;
+    
+    --primary: 0.51 0.125 45;
+    --primary-fg: 0.97 0.008 90;
+    --primary-bg: 0.92 0.04 45;
+    
+    --secondary: 0.50 0.10 160;
+    --secondary-fg: 0.97 0.008 90;
+    --secondary-bg: 0.92 0.035 160;
+    
+    --success: 0.50 0.095 160;
+    --success-bg: 0.92 0.04 160;
+    --warning: 0.50 0.110 78;
+    --warning-bg: 0.93 0.04 78;
+    --destructive: 0.50 0.15 30;
+    --destructive-bg: 0.93 0.05 30;
+    --destructive-fg: 0.97 0.008 90;   /* medido AA 5.93:1 sobre el sólido */
+    --info: 0.48 0.08 225;
+    --info-bg: 0.92 0.03 225;
+    
+    --chart-1: 0.50 0.095 160;
+    --chart-2: 0.560 0.110 78;
+    --chart-3: 0.48 0.08 225;
+    --chart-4: 0.50 0.10 340;
+    
+    --acc-sistema: 0.50 0.10 340;
+    --acc-catalogos: 0.52 0.115 70;
+    --acc-compras: 0.50 0.10 190;
+    --acc-inventario: 0.50 0.095 160;
+    --acc-entradas: 0.48 0.09 225;
+    
+    --radius: 4px;
+    --shadow: 0 1px 2px rgb(60 50 30/.08), 0 10px 30px rgb(60 50 30/.10);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground transition-colors duration-200;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-orbitron), sans-serif;
+    font-weight: var(--display-weight, 800);
+    letter-spacing: .015em;
+    line-height: 1.15;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground;
+  }
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   UTILIDADES DEL APP SHELL — Guia 0.6
+   Fuera de @layer a proposito: no compiten con ninguna utilidad de Tailwind
+   y no deben quedar sujetas al reordenamiento de capas.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Scroll discreto para la navegacion del Sidebar.
+   La barra por defecto de Windows mide 17px y rompe la alineacion del rail. */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(var(--border)) transparent;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: oklch(var(--border));
+  border-radius: 3px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: oklch(var(--muted-fg));
+}
+
+/* Transicion del colapso del Sidebar.
+   Solo width y transform: animar `all` haria que cada cambio de tema barriera
+   la pantalla durante 300ms en vez de cambiar limpio. */
+.shell-transition {
+  transition-property: width, transform, margin-left;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
+
+/* Respeta la preferencia del sistema de reducir movimiento (WCAG 2.3.3). */
+@media (prefers-reduced-motion: reduce) {
+  .shell-transition {
+    transition-duration: 0ms;
+  }
+}
