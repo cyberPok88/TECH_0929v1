@@ -14,7 +14,6 @@
 // en pantalla: no aporta).
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import Link from 'next/link'
 import type { ColumnDef } from '@tanstack/react-table'
 import { FileText } from 'lucide-react'
 
@@ -92,19 +91,37 @@ export const columnaPiezas: ColumnaEntrada = {
 // Entradas cuenta PIEZAS, no dinero (el costo vive en la nota de compra y en el detalle por
 // partida). Si una fase futura necesita el monto, se vuelve a declarar aquí.
 
-export const columnaDevolucion: ColumnaEntrada = {
-    id: 'devolucion',
-    accessorFn: (e) => e.devolucion_total,
-    label: 'DEV',
-    align: 'derecha',
-    movil: 'ocultar',
-    size: 72,
-    render: (_valor, fila) =>
-        fila.devolucion_total > 0 ? (
-            <Pildora texto={`−${fila.devolucion_total}`} tono="peligro" />
-        ) : (
-            <span className="text-muted-foreground">—</span>
-        ),
+/**
+ * ⭐ MEJORA 22 Sep 2026 (12) — la píldora de la DEV es una **ACCIÓN**: abre la devolución de la
+ * entrada (de qué partida y de qué producto declarado se devuelve, con qué motivo y en qué estado)
+ * junto con los botones de **ajustar y generar nota**. Se construye con el callback de quien la
+ * hospeda — una columna compartida no puede conocer el estado de React —, igual que
+ * `crearColumnaFinal` y `crearColumnaNota`.
+ */
+export function crearColumnaDevolucion(onVerDev?: (fila: Entrada) => void): ColumnaEntrada {
+    return {
+        id: 'devolucion',
+        accessorFn: (e) => e.devolucion_total,
+        label: 'DEV',
+        align: 'derecha',
+        movil: 'ocultar',
+        size: 72,
+        render: (_valor, fila) =>
+            fila.devolucion_total > 0 ? (
+                // La píldora NO cambia de forma (el usuario la aprobó): se envuelve para volverla botón.
+                <button
+                    type="button"
+                    onClick={() => onVerDev?.(fila)}
+                    disabled={!onVerDev}
+                    title="Ver la devolución: partida, producto, motivo, estado y ajuste."
+                    className="rounded-full transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive disabled:cursor-default disabled:hover:opacity-100"
+                >
+                    <Pildora texto={`−${fila.devolucion_total}`} tono="peligro" />
+                </button>
+            ) : (
+                <span className="text-muted-foreground">—</span>
+            ),
+    }
 }
 
 /**
@@ -155,28 +172,43 @@ export function crearColumnaFinal(onAjustar?: (e: Entrada) => void): ColumnaEntr
     }
 }
 
-export const columnaNota: ColumnaEntrada = {
-    id: 'nota',
-    accessorFn: (e) => e.nota_folio ?? '',
-    label: 'Nota de compra',
-    movil: 'ocultar',
-    // ⭐ MEJORA 22 Sep 2026 — no es texto: es la PÍLDORA que ABRE la nota de compra (mismo
-    // patrón que la celda «Final» del ajuste). El destino natural es la ficha completa
-    // (`/dashboard/compras/{id}`), que ya existe y trae sus acciones (pagar · cancelar ·
-    // editar) y su RBAC — el proyecto ya usa ese camino desde la ficha del proveedor.
-    render: (_valor, fila) =>
-        fila.nota_folio && fila.id_nota ? (
-            <Link
-                href={`/dashboard/compras/${fila.id_nota}`}
-                title={`Abrir la nota de compra ${fila.nota_folio}`}
-                className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5 font-mono text-[10px] text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-                <FileText className="size-3 shrink-0" aria-hidden="true" />
-                {fila.nota_folio}
-            </Link>
-        ) : (
-            <span className="text-muted-foreground">—</span>
-        ),
+/**
+ * ⭐ MEJORA 22 Sep 2026 — la píldora de la nota es una ACCIÓN (abrir la nota), y una columna
+ * compartida no puede saber del estado de React: se construye con el callback de quien la
+ * hospeda — Recepción y Alta —, igual que `crearColumnaFinal`.
+ *
+ * El destino NO es otra página: se monta `NotaCompraDetalleModal` (dueño: Guía 1.4), la ficha
+ * completa con sus acciones (pagar · cancelar · editar) y su RBAC. Consultar una nota no debe
+ * costar el estado de la tabla que se está trabajando.
+ */
+export function crearColumnaNota(onVerNota?: (fila: Entrada) => void): ColumnaEntrada {
+    return {
+        id: 'nota',
+        accessorFn: (e) => e.nota_folio ?? '',
+        label: 'Nota de compra',
+        movil: 'ocultar',
+        render: (_valor, fila) =>
+            fila.nota_folio && fila.id_nota ? (
+                <button
+                    type="button"
+                    onClick={() => onVerNota?.(fila)}
+                    disabled={!onVerNota}
+                    title={`Ver la nota de compra ${fila.nota_folio} sin salir de esta página`}
+                    className={cn(
+                        'inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5',
+                        'font-mono text-[10px] text-foreground transition-colors',
+                        'hover:border-primary/40 hover:bg-primary/10 hover:text-primary',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                        'disabled:cursor-default disabled:hover:border-border disabled:hover:bg-surface-2 disabled:hover:text-foreground'
+                    )}
+                >
+                    <FileText className="size-3 shrink-0" aria-hidden="true" />
+                    {fila.nota_folio}
+                </button>
+            ) : (
+                <span className="text-muted-foreground">—</span>
+            ),
+    }
 }
 
 export const columnaResultado: ColumnaEntrada = {

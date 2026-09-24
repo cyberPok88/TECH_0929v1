@@ -906,5 +906,3 @@ export async function listarProductosActivos(busqueda = ''): Promise<RespuestaLi
     if (error) return { success: false, error: error.message }
     return { success: true, data: (data ?? []) as unknown as ProductoOpcion[] }
 }
-
-export type { RespuestaAccion }

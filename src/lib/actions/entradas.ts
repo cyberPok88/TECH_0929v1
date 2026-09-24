@@ -477,7 +477,12 @@ export async function listarResultadoRevision(idEntrada: string): Promise<Respue
             : Promise.resolve({ data: [] }),
         supabase
             .from('devoluciones_entrada')
-            .select('id, id_entrada, id_partida_entrada, id_motivo, motivos_rechazo(nombre), cantidad, porcentaje_salud, ns, estado')
+            // ⭐ MEJORA 22 Sep 2026 (12) — la DEV dice de qué PARTIDA y de qué PRODUCTO declarado
+            // (categoría + atributos de recepción = la huella) se devuelve, y cuándo se ajustó.
+            // Embed anidado (devoluciones → partidas_entrada → categorias_producto): sin SQL nuevo.
+            .select(
+                'id, id_entrada, id_partida_entrada, id_motivo, motivos_rechazo(nombre), cantidad, porcentaje_salud, ns, estado, fecha_ajuste, created_at, partidas_entrada(partida, categorias_producto(nombre), atributos)'
+            )
             .eq('id_entrada', idEntrada),
     ])
     const aprobadasFlat = ((aprobadas ?? []) as unknown as {
@@ -510,6 +515,13 @@ export async function listarResultadoRevision(idEntrada: string): Promise<Respue
         porcentaje_salud: number | null
         ns: string | null
         estado: string
+        fecha_ajuste: string | null
+        created_at: string
+        partidas_entrada: {
+            partida: number | null
+            categorias_producto: { nombre: string | null } | null
+            atributos: Record<string, unknown> | null
+        } | null
     }[]).map((d) => ({
         id: d.id,
         id_entrada: d.id_entrada,
@@ -520,6 +532,11 @@ export async function listarResultadoRevision(idEntrada: string): Promise<Respue
         porcentaje_salud: d.porcentaje_salud,
         ns: d.ns,
         estado: d.estado as DevolucionEntrada['estado'],
+        fecha_ajuste: d.fecha_ajuste,
+        created_at: d.created_at,
+        partida_numero: d.partidas_entrada?.partida ?? null,
+        categoria_nombre: d.partidas_entrada?.categorias_producto?.nombre ?? null,
+        atributos: d.partidas_entrada?.atributos ?? {},
     }))
     return {
         success: true,

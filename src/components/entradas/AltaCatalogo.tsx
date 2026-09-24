@@ -16,13 +16,14 @@ import { listarEntradas } from '@/lib/actions/entradas'
 import type { Entrada, FiltrosEntradas } from '@/types/entradas'
 import { RecepcionFilters, FILTROS_ENTRADAS_DEFAULT } from '@/components/entradas/RecepcionFilters'
 import { CotejoAltaModal } from '@/components/entradas/alta/CotejoAltaModal'
+import { NotaCompraDetalleModal } from '@/components/compras/NotaCompraDetalleModal'
 import {
     columnaEstado,
     columnaFolio,
-    columnaNota,
     columnaPartidas,
     columnaPiezas,
     columnaProveedor,
+    crearColumnaNota,
     type ColumnaEntrada,
 } from '@/components/entradas/columnas-entrada'
 
@@ -43,6 +44,8 @@ export function AltaCatalogo() {
     const [tamano, setTamano] = useState(25)
     const [total, setTotal] = useState(0)
     const [seleccion, setSeleccion] = useState<Entrada | null>(null)
+    // ⭐ MEJORA 22 Sep 2026 — la nota de compra se consulta en modal: no se abandona el alta.
+    const [notaDetalle, setNotaDetalle] = useState<string | null>(null)
 
     const puedeAprobar = useCanAction(RUTA, 'aprobar')
 
@@ -109,7 +112,7 @@ export function AltaCatalogo() {
             columnaProveedor,
             columnaPartidas,
             columnaPiezas,
-            columnaNota,
+            crearColumnaNota((e) => setNotaDetalle(e.id_nota ?? null)),
             columnaEstado,
             columnaAcciones,
         ],
@@ -163,6 +166,13 @@ export function AltaCatalogo() {
                 onGuardado={() => {
                     void recargar()
                 }}
+            />
+            <NotaCompraDetalleModal
+                open={notaDetalle !== null}
+                onOpenChange={(abierto) => {
+                    if (!abierto) setNotaDetalle(null)
+                }}
+                notaId={notaDetalle}
             />
         </>
     )

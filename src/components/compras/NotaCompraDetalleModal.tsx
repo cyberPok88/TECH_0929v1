@@ -26,9 +26,11 @@ interface NotaCompraDetalleModalProps {
     onOpenChange: (open: boolean) => void
     /** Nota a mostrar; `null` mientras no se elige ninguna. */
     notaId: string | null
+    /** La ficha cambió algo (editar · pagar · cancelar): refresca el listado que quedó detrás. */
+    onCambio?: () => void
 }
 
-export function NotaCompraDetalleModal({ open, onOpenChange, notaId }: NotaCompraDetalleModalProps) {
+export function NotaCompraDetalleModal({ open, onOpenChange, notaId, onCambio }: NotaCompraDetalleModalProps) {
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
@@ -38,7 +40,7 @@ export function NotaCompraDetalleModal({ open, onOpenChange, notaId }: NotaCompr
                     <DialogTitle className="sr-only">Nota de compra</DialogTitle>
                 </DialogHeader>
                 {/* Se monta solo con el diálogo abierto: la ficha no pide datos en balde. */}
-                {notaId && <NotaCompraFicha key={notaId} notaId={notaId} enModal />}
+                {notaId && <NotaCompraFicha key={notaId} notaId={notaId} enModal onCambio={onCambio} />}
             </DialogContent>
         </Dialog>
     )

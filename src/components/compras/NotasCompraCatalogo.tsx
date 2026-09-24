@@ -18,7 +18,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import type { ColumnDef } from '@tanstack/react-table'
 import { toast } from 'sonner'
 import { Pencil, Plus, Banknote, Ban, Eye, Download } from 'lucide-react'
@@ -34,6 +33,7 @@ import { NotaCompraFilters, FILTROS_NOTAS_DEFAULT } from '@/components/compras/N
 import { NotaCompraModal } from '@/components/compras/NotaCompraModal'
 import { RegistrarPagoNotaDialog } from '@/components/compras/RegistrarPagoNotaDialog'
 import { CancelarNotaCompraDialog } from '@/components/compras/CancelarNotaCompraDialog'
+import { NotaCompraDetalleModal } from '@/components/compras/NotaCompraDetalleModal'
 import { exportarNotasCompraCsv } from '@/components/compras/exportar-notas-compra-csv'
 import type { FiltrosNotaCompra, NotaCompra, NotaCompraDetalle } from '@/types/notas-compra'
 import {
@@ -68,8 +68,6 @@ type DialogoNota =
     | null
 
 export function NotasCompraCatalogo() {
-    const router = useRouter()
-
     const [notas, setNotas] = useState<NotaCompra[]>([])
     const [estadoTabla, setEstadoTabla] = useState<EstadoTabla>('loading')
     const [filtros, setFiltros] = useState<FiltrosNotaCompra>(FILTROS_NOTAS_DEFAULT)
@@ -79,6 +77,8 @@ export function NotasCompraCatalogo() {
     const [proveedores, setProveedores] = useState<{ valor: string; etiqueta: string }[]>([])
     const [modal, setModal] = useState<{ modo: 'crear' } | { modo: 'editar'; nota: NotaCompraDetalle } | null>(null)
     const [dialogo, setDialogo] = useState<DialogoNota>(null)
+    // ⭐ MEJORA 22 Sep 2026 — la nota que se está CONSULTANDO (modal), no editando.
+    const [detalleId, setDetalleId] = useState<string | null>(null)
 
     const puedeCrear = useCanAction(RUTA, 'crear')
     const puedeEditar = useCanAction(RUTA, 'editar')
@@ -188,6 +188,12 @@ export function NotasCompraCatalogo() {
         [abrirDiferido]
     )
 
+    // ⭐ MEJORA 22 Sep 2026 — «Ver» ya no navega a `/dashboard/compras/{id}`: abre la nota en
+    // MODAL y no se pierde el listado (filtros, página, selección).
+    // Abre DIRECTO, no diferido: el `crearColumnaAcciones` del kit pinta todas las acciones como
+    // botones inline — el menú ⋮ que motivó el retardo de 160 ms ya no existe en esta tabla.
+    const abrirVer = useCallback((n: NotaCompra) => setDetalleId(n.id), [])
+
     // Columna de acciones (Ver · ⋮ Editar/Pagar/Cancelar).
     const columnaAcciones = useMemo(
         () =>
@@ -197,7 +203,7 @@ export function NotasCompraCatalogo() {
                         icon: Eye,
                         label: 'Ver',
                         dataAccion: 'ver',
-                        onClick: (n) => router.push(`${RUTA}/${n.id}`),
+                        onClick: (n) => abrirVer(n),
                     },
                 ],
                 secundarias: [
@@ -233,7 +239,7 @@ export function NotasCompraCatalogo() {
                         : []),
                 ],
             }),
-        [router, puedeEditar, puedeEliminar, abrirEditar, abrirPago, abrirCancelar]
+        [puedeEditar, puedeEliminar, abrirEditar, abrirPago, abrirCancelar, abrirVer]
     )
 
     const columnas = useMemo<(ColumnDef<NotaCompra> & ColumnDefExtension<NotaCompra>)[]>(
@@ -513,6 +519,16 @@ export function NotasCompraCatalogo() {
                 onOpenChange={cerrarDialogo}
                 notas={dialogo?.tipo === 'cancelar' ? dialogo.notas : null}
                 onGuardado={trasGuardado}
+            />
+            <NotaCompraDetalleModal
+                open={detalleId !== null}
+                onOpenChange={(abierto) => {
+                    if (!abierto) setDetalleId(null)
+                }}
+                notaId={detalleId}
+                onCambio={() => {
+                    void recargar()
+                }}
             />
         </>
     )

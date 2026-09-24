@@ -22,16 +22,17 @@ import { EntradaDetailModal } from '@/components/entradas/EntradaDetailModal'
 import { AjusteDevModal } from '@/components/entradas/AjusteDevModal'
 import { exportarEntradasCsv } from '@/components/entradas/exportar-entradas-csv'
 import { PartidasExpandidas } from '@/components/entradas/PartidasExpandidas'
+import { NotaCompraDetalleModal } from '@/components/compras/NotaCompraDetalleModal'
 import {
-    columnaDevolucion,
     columnaEstado,
     columnaFecha,
     columnaFolio,
-    columnaNota,
     columnaPartidas,
     columnaPiezas,
     columnaProveedor,
+    crearColumnaDevolucion,
     crearColumnaFinal,
+    crearColumnaNota,
     type ColumnaEntrada,
 } from '@/components/entradas/columnas-entrada'
 
@@ -56,6 +57,8 @@ export function RecepcionCatalogo() {
     const [modal, setModal] = useState<ModalState>(null)
     const [detalle, setDetalle] = useState<Entrada | null>(null)
     const [ajuste, setAjuste] = useState<Entrada | null>(null)
+    // ⭐ MEJORA 22 Sep 2026 — nota de compra en MODAL: consultarla ya no saca de Recepción.
+    const [notaDetalle, setNotaDetalle] = useState<string | null>(null)
 
     const puedeCrear = useCanAction(RUTA, 'crear')
     const puedeEditar = useCanAction(RUTA, 'editar')
@@ -148,10 +151,13 @@ export function RecepcionCatalogo() {
             columnaProveedor,
             columnaPartidas,
             columnaPiezas, // «PZ. RECIBIDAS» — lo declarado
-            columnaDevolucion, // «DEV» — lo rechazado
+            // «DEV» — lo rechazado: píldora-botón que abre la devolución (partida · producto ·
+            // motivo · estado) con el ajuste y la nota ahí mismo.
+            crearColumnaDevolucion((e) => setAjuste(e)),
             // El resultado: Σ vigente — y, si el ajuste está pendiente, el BOTÓN que lo abre.
             crearColumnaFinal((e) => setAjuste(e)),
-            columnaNota,
+            // La nota se ABRE en modal (no navega): se sigue viendo la tabla que se trabaja.
+            crearColumnaNota((e) => setNotaDetalle(e.id_nota ?? null)),
             columnaEstado,
             columnaAcciones,
         ],
@@ -262,6 +268,13 @@ export function RecepcionCatalogo() {
                 onGuardado={() => {
                     void recargar()
                 }}
+            />
+            <NotaCompraDetalleModal
+                open={notaDetalle !== null}
+                onOpenChange={(abierto) => {
+                    if (!abierto) setNotaDetalle(null)
+                }}
+                notaId={notaDetalle}
             />
         </>
     )

@@ -121,6 +121,17 @@ export interface DevolucionEntrada {
     fecha_ajuste: string | null
     creado_por: string | null
     created_at: string
+    /**
+     * ⭐ MEJORA 22 Sep 2026 (12) — **display aplanado** del embed de `listarResultadoRevision`: de
+     * QUÉ partida y de qué **producto declarado** (categoría + atributos capturados en recepción =
+     * la huella) se está devolviendo. Responde «¿qué se devuelve?» sin abrir nada más.
+     * ⚠️ El **SKU no existe aquí**: lo resuelve Almacén y solo para lo **aprobado** — una pieza
+     * devuelta nunca llega a SKU, y la marca que el técnico elige en el wizard se descarta al
+     * agrupar los NO_PASA por (partida, motivo).
+     */
+    partida_numero: number | null
+    categoria_nombre: string | null
+    atributos: Record<string, unknown>
 }
 
 // ── Bitácora de transiciones (append-only) ─────────────────────────────────────
@@ -290,6 +301,14 @@ export const TEXTO_ESTADO_PARTIDA: Record<EstadoPartida, string> = {
 export const TEXTO_ESTADO_DEVOLUCION: Record<EstadoDevolucion, string> = {
     por_cotejar: 'Por cotejar',
     ajustada: 'Ajustada',
+}
+
+/** ⭐ MEJORA 22 Sep 2026 (12) — la DEV tiene estado y ahora se ve: ámbar mientras espera el ajuste
+ *  del recepcionista, verde en tinta cuando el ajuste ya ocurrió (mismo criterio de la MEJORA 10:
+ *  tinta = pendiente/cerrado, relleno = en marcha). */
+export const TONO_ESTADO_DEVOLUCION: Record<EstadoDevolucion, TonoPildora> = {
+    por_cotejar: 'advertencia',
+    ajustada: 'listo',
 }
 
 // ── Respuestas tipadas de las Server Actions (nunca throw — patrón 0.9) ─────────

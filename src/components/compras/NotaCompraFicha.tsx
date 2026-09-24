@@ -55,7 +55,17 @@ function FilaDetalle({ etiqueta, valor }: { etiqueta: string; valor: React.React
     )
 }
 
-export function NotaCompraFicha({ notaId, enModal = false }: { notaId: string; enModal?: boolean }) {
+export function NotaCompraFicha({
+    notaId,
+    enModal = false,
+    onCambio,
+}: {
+    notaId: string
+    enModal?: boolean
+    /** ⭐ MEJORA 22 Sep 2026 — la ficha cambió algo (editar · pagar · cancelar): quien la hospeda
+     *  refresca lo suyo. Dentro del modal, el listado que quedó DETRÁS no se enteraría solo. */
+    onCambio?: () => void
+}) {
     const router = useRouter()
     const [nota, setNota] = useState<NotaCompraDetalle | null>(null)
     const [cargando, setCargando] = useState(true)
@@ -92,6 +102,12 @@ export function NotaCompraFicha({ notaId, enModal = false }: { notaId: string; e
             activo = false
         }
     }, [notaId])
+
+    /** Recarga la nota y avisa hacia afuera (el modal lo usa para refrescar el listado de atrás). */
+    const trasGuardado = useCallback(() => {
+        void cargar()
+        onCambio?.()
+    }, [cargar, onCambio])
 
     if (errorCarga) {
         return (
@@ -316,25 +332,19 @@ export function NotaCompraFicha({ notaId, enModal = false }: { notaId: string; e
                 onOpenChange={setModalEditar}
                 modo="editar"
                 nota={nota}
-                onGuardado={() => {
-                    void cargar()
-                }}
+                onGuardado={trasGuardado}
             />
             <RegistrarPagoNotaDialog
                 open={dialogo?.tipo === 'pago'}
                 onOpenChange={(a) => setDialogo(a ? { tipo: 'pago' } : null)}
                 nota={nota}
-                onGuardado={() => {
-                    void cargar()
-                }}
+                onGuardado={trasGuardado}
             />
             <CancelarNotaCompraDialog
                 open={dialogo?.tipo === 'cancelar'}
                 onOpenChange={(a) => setDialogo(a ? { tipo: 'cancelar' } : null)}
                 notas={nota ? [nota] : null}
-                onGuardado={() => {
-                    void cargar()
-                }}
+                onGuardado={trasGuardado}
             />
         </div>
     )
