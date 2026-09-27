@@ -112,7 +112,13 @@ export default async function DashboardLayout({
                             spec lo permite vía "overflow no visible ⇒ min-auto = 0",
                             pero min-h-0 lo garantiza en CUALQUIER navegador y hace
                             la intención visible sin depender de esa sutileza. */}
-                        <main className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
+                        {/* ⭐ `id="shell-main"`: contrato del contenedor de scroll del
+                            Shell. Lo lee <FiltrosBar /> (0.6) para reaccionar al
+                            scroll del usuario — en móvil sube el bloque de filtros
+                            cuando se baja por una tabla larga y lo devuelve al
+                            subir. El id es el único punto de acople: el layout no
+                            conoce los filtros y la sección no conoce el layout. */}
+                        <main id="shell-main" className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
 {/* Guía 0.11 Parte 4 — banner de primer ingreso.
                                 Dentro del <main> para que scrollee con el contenido.
                                 Arriba del RBACGuard para que se vea en cualquier

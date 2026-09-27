@@ -1,27 +1,68 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PARTIDAS DE REVISIÓN — contenido de la fila expandible del acordeón del técnico
-// (Guía 1.6 · MEJORA 20 Sep 2026). Espejo del acordeón de la V5
-// (`listarEntradasRevConPartidas`): el técnico ve las PARTIDAS del ingreso con su
-// AVANCE (recibidas · revisadas · restantes · estado) y elige cuál iniciar.
+// PARTIDAS DE REVISIÓN — desglose de la cola del técnico (Guía 1.6 · Fase 2)
+//
+// ⭐ MEJORA 24 Sep 2026 — el desglose dejó de ser el espejo del acordeón de la V5
+// (`listarEntradasRevConPartidas`: Partida · Producto · Recibidas · Revisadas · Restantes ·
+// Estado) y pasó a contar **la evolución de la información**: lo que Recepción DECLARÓ y lo que
+// la Revisión CONSTRUYÓ. Es el pedido del usuario: *«el objetivo de esa fase es revisar pieza por
+// pieza … lo importante es cómo evoluciona la información que se hizo en entradas»*.
+//
+//   ② la DEV dice **cuántas** —«2 malas», no «Con malas»— y su píldora **es botón**: abre la
+//      devolución. Mismo patrón que `crearColumnaDevolucion` de Recepción (MEJORA 12: la píldora
+//      no cambia de forma, se envuelve).
+//   ③ el avance se lee con **barra de 3 tramos** (aprobadas · DEV · pendientes), como el desglose
+//      de Recepción, no con un número suelto: con 200 piezas una barra por pieza no escala.
+//   · la huella resuelta (marca + atributos nuevos) va **debajo** de la declarada.
+//
+// Diseño aprobado: `DOCS/design/entradas/revision-puesto-tactil.html` §3.
+// ⚠️ La huella de una partida puede ser VARIAS (una partida de 100 discos puede rendir 2TB y 4TB):
+// se pintan todas — elegir una sería mentir sobre lo aprobado.
+//
+// ⭐ EXTRACCIÓN 24 Sep 2026 — la tabla + el timeline viven en `PartidasAvance` (presentacional),
+// para que la MISMA superficie se pueda abrir en **solo lectura** desde Recepción
+// (`AvanceRevisionModal`: la píldora «En revisión técnica» es la puerta). Aquí queda lo que es de
+// esta cola: la carga de datos, el **riel de acento + sangría de 56px** que la anida a la fila del
+// padre, y las tres puertas por partida (Iniciar · Liberar · Ver resultado) + la DEV.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useEffect, useState } from 'react'
-import { Play } from 'lucide-react'
 
-import { Pildora } from '@/components/data-table'
-import { Button } from '@/components/ui/button'
 import { listarPartidasConAvance } from '@/lib/actions/entradas'
+import { PartidasAvance } from '@/components/entradas/PartidasAvance'
 import type { Entrada, PartidaConAvance } from '@/types/entradas'
 
 interface PartidasRevisionProps {
     entrada: Entrada
     /** Abre el wizard de revisión en esa partida. */
     onIniciar: (idPartida: string) => void
+    /** ⭐ ② Abre la DEVOLUCIÓN de esa partida (la píldora «n malas» es botón). */
+    onVerDev: (entrada: Entrada, idPartida: string) => void
+    /** Abre el resultado de la revisión (partida ya cerrada). */
+    onVerResultado: (entrada: Entrada) => void
+    /**
+     * ⭐ MEJORA 25/30 — libera a acondicionamiento lo aprobado, en tres profundidades y **el mismo
+     * modal**: la LÍNEA (su grupo), la PARTIDA (`idPartida`) y la ENTRADA entera (`null` → sin
+     * filtro). Es lo que evita abrir el modal una vez por partida en una entrada de 20 partidas.
+     */
+    onLiberar: (entrada: Entrada, idPartida: string | null, idGrupo?: string) => void
+    /**
+     * ⭐ FIX 25 Sep 2026 (30-bis) — **puesto de dedo**: lo enciende la cola que se opera con el dedo
+     * (Revisión) para que las puertas del desglose midan **44** y no el `sm` del kit (32). Quien pinta
+     * los controles es `PartidasAvance`.
+     */
+    tactil?: boolean
 }
 
-export function PartidasRevision({ entrada, onIniciar }: PartidasRevisionProps) {
+export function PartidasRevision({
+    entrada,
+    onIniciar,
+    onVerDev,
+    onVerResultado,
+    onLiberar,
+    tactil = false,
+}: PartidasRevisionProps) {
     const [partidas, setPartidas] = useState<PartidaConAvance[]>([])
     const [cargando, setCargando] = useState(true)
 
@@ -37,57 +78,24 @@ export function PartidasRevision({ entrada, onIniciar }: PartidasRevisionProps) 
         }
     }, [entrada.id])
 
-    if (cargando) return <p className="text-sm text-muted-foreground">Cargando partidas…</p>
-    if (partidas.length === 0) return <p className="text-sm text-muted-foreground">Sin partidas.</p>
-
     return (
-        <table className="w-full text-xs">
-            <thead className="text-center text-muted-foreground">
-                <tr>
-                    <th className="py-1 pr-3">Partida</th>
-                    <th className="py-1 pr-3">Producto</th>
-                    <th className="py-1 pr-3">Recibidas</th>
-                    <th className="py-1 pr-3">Revisadas</th>
-                    <th className="py-1 pr-3">Restantes</th>
-                    <th className="py-1 pr-3">Estado</th>
-                    <th className="py-1" />
-                </tr>
-            </thead>
-            <tbody>
-                {partidas.map((p) => {
-                    const completa = p.restantes <= 0
-                    return (
-                        <tr key={p.id} className="border-t border-border">
-                            <td className="py-1 pr-3 text-center tabular-nums">{p.partida}</td>
-                            <td className="py-1 pr-3 text-center">{p.categoria_nombre ?? '—'}</td>
-                            <td className="py-1 pr-3 text-center tabular-nums">{p.cantidad_original}</td>
-                            <td className="py-1 pr-3 text-center tabular-nums">{p.revisadas}</td>
-                            <td className="py-1 pr-3 text-center tabular-nums">{p.restantes}</td>
-                            <td className="py-1 pr-3 text-center">
-                                {p.estado_partida === 'OK' ? (
-                                    <Pildora texto="OK" tono="exito" />
-                                ) : p.estado_partida === 'MAL' ? (
-                                    <Pildora texto="Con malas" tono="peligro" />
-                                ) : (
-                                    <Pildora texto="Pendiente" tono="advertencia" />
-                                )}
-                            </td>
-                            <td className="py-1 text-center">
-                                {!completa && (
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => onIniciar(p.id)}
-                                    >
-                                        <Play className="mr-1 h-3.5 w-3.5" /> Iniciar
-                                    </Button>
-                                )}
-                            </td>
-                        </tr>
-                    )
-                })}
-            </tbody>
-        </table>
+        // ⭐ 24 Sep 2026 (usuario) — el desglose se ANIDA al padre y se ve que es suyo: **riel** de
+        // acento a la izquierda + **sangría de 56px**, que es justo el ancho de la columna del
+        // chevron (`w-12 md:w-10` + `px-3` de la fila expandida del kit) → la tabla hija arranca
+        // alineada con la columna Folio del padre, como un hijo en un árbol. Más el ancho tope:
+        // antes medía lo mismo que la tabla padre y no se leía como «esto pertenece a la fila de
+        // arriba» (*«que realmente se vea quién es el padre y cuáles sus detalles»*).
+        <div className="flex max-w-[1080px] flex-col gap-3 border-l-2 border-acc-entradas/50 pl-14 pr-2">
+            <PartidasAvance
+                entrada={entrada}
+                partidas={partidas}
+                cargando={cargando}
+                tactil={tactil}
+                onIniciar={onIniciar}
+                onVerDev={onVerDev}
+                onVerResultado={onVerResultado}
+                onLiberar={onLiberar}
+            />
+        </div>
     )
 }

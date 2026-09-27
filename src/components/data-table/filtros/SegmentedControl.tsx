@@ -13,7 +13,7 @@ export interface SegmentedControlProps {
 
 export function SegmentedControl({ label, opciones, valor, onValorChange, disabled }: SegmentedControlProps) {
     return (
-        <div className="flex flex-col gap-1">
+        <div className="flex w-full flex-col gap-1 md:w-auto">
             <span className="text-xs text-muted-foreground">{label}</span>
             <div role="group" aria-label={label} className="flex flex-wrap gap-1">
                 {opciones.map((o) => (
@@ -25,7 +25,9 @@ export function SegmentedControl({ label, opciones, valor, onValorChange, disabl
                         aria-pressed={valor === o.valor}
                         disabled={disabled}
                         onClick={() => onValorChange(o.valor)}
-                        className="h-8"
+                        // ⭐ MEJORA 26 Sep 2026 — `h-11 md:h-8`: en móvil los botones
+                        // medían 32px de alto y se quedaban por debajo de la Ley 5.
+                        className="h-11 md:h-8"
                     >
                         {o.etiqueta}
                     </Button>

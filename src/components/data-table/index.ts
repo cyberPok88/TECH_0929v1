@@ -26,7 +26,13 @@ export { FiltroSwitch } from "./filtros/FiltroSwitch"
 export { RangoFechas } from "./filtros/RangoFechas"
 export { SegmentedControl } from "./filtros/SegmentedControl"
 
+// ⭐ MEJORA 26 Sep 2026 (contrato agregado) — FILTRO EN EL ENCABEZADO DE LA COLUMNA.
+// El DataTable lo pinta; los CRUDs solo declaran `filtro` en su columna. `limpiarFiltroColumna`
+// se exporta para que un CRUD pueda ofrecer «quitar» fuera del panel si lo necesita.
+export { FiltroColumnaBoton, limpiarFiltroColumna } from "./filtros/FiltroColumna"
+
 export type { TonoPildora } from "./celdas/Pildora"
+export type { ChipFiltro } from "./filtros/CatalogoFilters"
 
 // Tipos del contrato (re-export desde types/table.ts)
 export type {
@@ -37,4 +43,6 @@ export type {
     ColumnDefExtension,
     ToolbarContext,
     SeleccionTabla,
+    FiltroColumna,
+    OpcionFiltroColumna,
 } from "@/types/table"

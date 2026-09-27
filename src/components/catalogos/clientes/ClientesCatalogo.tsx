@@ -432,10 +432,38 @@ export function ClientesCatalogo() {
         return lista
     }, [puedeCrear, puedeEditar, puedeArchivar, puedeExportar, seleccionados, clientes])
 
+    // ⭐ FIX 26 Sep 2026 — LOS FILTROS DE CLIENTES ESTABAN ESCONDIDOS.
+    // Vivían en `renderToolbar` del DataTable, que el kit solo dibuja cuando
+    // `enableRowSelection && renderToolbar && selectedRows.length > 0`: en la práctica, la
+    // búsqueda y los tabs de estatus (Todos/Activos/Archivados/Suspendidos) + los selects de
+    // marca·vendedor·ruta·tipo **solo aparecían después de marcar una fila**. El catálogo se
+    // veía sin filtros y no había forma de buscar un cliente.
+    // Ahora van donde va el de los demás módulos: la sección `FiltrosBar` del Shell
+    // (`usePageConfig.filtros`, decisión 25 de la 0.6) — que además es la que tiene el techo
+    // en móvil, el pliegue al scrollear y la fila única en escritorio.
+    const manejarFiltros = useCallback((patch: Partial<FiltrosCliente>) => {
+        // Anunciar la recarga: el efecto no puede poner `loading` (cero setState en efectos).
+        setEstadoTabla('loading')
+        setFiltros((prev) => ({ ...prev, ...patch }))
+    }, [])
+
+    const filtrosBarra = useMemo(
+        () => (
+            <ClienteFilters
+                filtros={filtros}
+                onFiltrosChange={manejarFiltros}
+                opciones={opciones}
+                contador={clientes.length}
+            />
+        ),
+        [filtros, manejarFiltros, opciones, clientes.length]
+    )
+
     usePageConfig({
         info: { title: 'Clientes', subtitle: 'Catálogos' },
         path: RUTA,
         actions: acciones,
+        filtros: filtrosBarra,
     })
 
     const ejecutarConfirmacion = async (): Promise<{ error: string | null }> => {
@@ -504,14 +532,9 @@ export function ClientesCatalogo() {
                 enableRowSelection
                 rowSelection={seleccion}
                 onRowSelectionChange={onSeleccionChange}
-                renderToolbar={() => (
-                    <ClienteFilters
-                        filtros={filtros}
-                        onFiltrosChange={(patch) => setFiltros((prev) => ({ ...prev, ...patch }))}
-                        opciones={opciones}
-                        contador={clientes.length}
-                    />
-                )}
+                // ⭐ FIX 26 Sep 2026 — aquí vivía `renderToolbar={() => <ClienteFilters …/>}`, y
+                // el kit solo dibuja esa barra cuando hay filas marcadas: los filtros eran
+                // invisibles. Se mudaron a `usePageConfig({ filtros })` (ver arriba).
             />
 
             <ClienteModal

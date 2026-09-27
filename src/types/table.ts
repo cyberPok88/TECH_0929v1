@@ -33,6 +33,61 @@ export interface PageSizeOption {
 export type EstadoTabla = "idle" | "loading" | "error"
 
 /**
+ * Opción de un filtro de columna. Misma FORMA que `FiltroOpcion` del kit (0.8 P9),
+ * declarada aquí para no invertir la dependencia `types/ → components/`.
+ */
+export interface OpcionFiltroColumna {
+    valor: string
+    etiqueta: string
+}
+
+/** Campos comunes a todo filtro de columna. */
+interface BaseFiltroColumna {
+    /** Etiqueta del control dentro del panel. Default: el `label` de la columna. */
+    etiqueta?: string
+    /** Resumen corto del filtro aplicado («01/09/2026 – 30/09/2026»). Va en el `title`. */
+    resumen?: string
+    /** ¿Hay filtro aplicado? Pinta el embudo en tinta de acento y habilita «Quitar». */
+    activo: boolean
+}
+
+/**
+ * ⭐ MEJORA 26 Sep 2026 — FILTRO EN EL ENCABEZADO DE LA COLUMNA (contrato agregado).
+ *
+ * El usuario lo pidió tras verlo en otra app: *«los encabezados de la tabla servían como los
+ * filtros: el encabezado Fecha, si le apretabas, mostraba como un mini modal de filtro»*.
+ *
+ * Es unión discriminada por `tipo` y el VALOR LO GOBIERNA EL PADRE — igual que el resto de la
+ * tabla. El DataTable no guarda estado de filtros: solo pinta el embudo en el `<th>` y le pasa
+ * el descriptor al control del kit que corresponda (0.8 P9). Nada de esto conoce el dominio.
+ *
+ * ⚠️ **Un filtro de COLUMNA no sustituye al filtro de DOMINIO.** Hay filtros que no son una
+ * columna — «Cola» en Entradas es un CONJUNTO de estados (una vista de flujo), «Antigüedad» no
+ * es una columna y el buscador cubre folio + proveedor. La adopción es híbrida: la columna para
+ * lo que es de columna (fecha, estado, marca…), el `FiltrosBar` para lo que es del proceso.
+ */
+export type FiltroColumna =
+    | (BaseFiltroColumna & {
+          tipo: 'texto'
+          valor: string
+          onValorChange: (v: string) => void
+          placeholder?: string
+      })
+    | (BaseFiltroColumna & {
+          tipo: 'opciones'
+          opciones: OpcionFiltroColumna[]
+          valor: string
+          onValorChange: (v: string) => void
+          /** Texto de la opción «todas». Default: «Todas». */
+          etiquetaTodos?: string
+      })
+    | (BaseFiltroColumna & {
+          tipo: 'rango-fechas'
+          valor: { desde: string; hasta: string }
+          onValorChange: (v: { desde: string; hasta: string }) => void
+      })
+
+/**
  * Extensión de ColumnDef de TanStack (⭐ REDISEÑO 02 Sep 2026).
  * `visible` controla si la columna aparece en ColumnSelector (default: true).
  * `render` opcional — si no se define, muestra String(value ?? "—") (Decisión 11).
@@ -42,6 +97,8 @@ export type EstadoTabla = "idle" | "loading" | "error"
  *   colapsa a ancho mínimo · 'ocultar' se oculta.
  * `fijaDerecha`/`fijaIzquierda` — columna sticky en scroll horizontal (R1); la columna
  *   de acciones (crearColumnaAcciones) es fijaDerecha por contrato.
+ * `filtro` — ⭐ MEJORA 26 Sep 2026: embudo en el `<th>` que abre el panel de filtro
+ *   de esa columna. Opcional: sin él, la columna se comporta como siempre.
  */
 export interface ColumnDefExtension<TData = unknown> {
     visible?: boolean
@@ -51,6 +108,7 @@ export interface ColumnDefExtension<TData = unknown> {
     movil?: "critica" | "secundaria" | "ocultar"
     fijaDerecha?: boolean
     fijaIzquierda?: boolean
+    filtro?: FiltroColumna
 }
 
 /**
@@ -101,6 +159,15 @@ export interface DataTableProps<TData = unknown> {
 
     /** Mensaje cuando data está vacía (estado idle) */
     emptyMessage?: string
+
+    /** ⭐ MEJORA 26 Sep 2026 — ¿hay filtros aplicados FUERA de la tabla?
+     *  Cambia el estado vacío: con filtros dice **«ninguna coincide»** y ofrece limpiarlos,
+     *  en vez de mentir con el vacío genérico. Distinguir «no hay datos» de «tú los
+     *  escondiste» es la duda nº1 de cualquier listado filtrado. */
+    filtrosActivos?: boolean
+
+    /** Limpia los filtros del listado. Sin él, el estado vacío filtrado no ofrece botón. */
+    onLimpiarFiltros?: () => void
 
     /** Callback al hacer click en Reintentar (estado error) */
     onRetry?: () => void
@@ -183,6 +250,19 @@ export interface DataTableProps<TData = unknown> {
     /** Altura máxima del contenedor (CSS) — activa el scroll vertical y el sticky
      *  header (R1/R6). Ej: "360px". Sin ella, la tabla crece con su contenido. */
     alturaMaxima?: string
+
+    /** ⭐ PROMOCIÓN 24 Sep 2026 (Guía 1.6 Fase 2 Revisión → kit 0.8) — MODO TÁCTIL POR PUESTO.
+     *
+     *  La densidad del kit se decidía por **ancho de ventana** (`min-width: 768px`), así que una
+     *  tablet de piso en horizontal (1024–1280px) recibía «compacto»: objetivos de **32px** para
+     *  un dedo. Ese es el eje que faltaba — un puesto de trabajo es táctil **por cómo se opera**,
+     *  no por cuántos píxeles mide.
+     *
+     *  Con `modoTactil` activo: densidad `normal` (objetivos de 44px) y los controles de fila
+     *  (chevron de expansión, acciones) conservan su tamaño táctil en cualquier ancho.
+     *  Consumidores: **1.6 Entradas** (Revisión) · 1.6 Acondicionamiento y Almacén (futuro,
+     *  también puestos de piso) · cualquier CRUD con estación de dedo. */
+    modoTactil?: boolean
 
     /** ⭐ PROMOCIÓN 20 Sep 2026 (Guía 1.6 Entradas → kit 0.8) — FILA EXPANDIBLE.
      *  Si se pasa, cada fila muestra un chevron y al expandir renderiza este

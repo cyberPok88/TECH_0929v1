@@ -25,7 +25,9 @@ export function exportarEntradasCsv(entradas: Entrada[]): void {
         'Folio',
         'Fecha',
         'Proveedor',
-        'Partidas',
+        // ⭐ MEJORA 30 (usuario) — la columna se llama **Productos**: es la cifra que ya contaba la
+        // MEJORA 28 (las líneas del desglose), con el nombre que no miente.
+        'Productos',
         'Piezas',
         'Total',
         'Devolución',

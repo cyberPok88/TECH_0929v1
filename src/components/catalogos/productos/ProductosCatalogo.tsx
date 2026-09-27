@@ -450,7 +450,11 @@ export function ProductosCatalogo() {
         <div className="space-y-4">
             <ProductoFilters
                 filtros={filtros}
-                onFiltrosChange={(patch) => setFiltros((f) => ({ ...f, ...patch }))}
+                onFiltrosChange={(patch) => {
+                    // ⭐ MEJORA 26 Sep 2026 — anunciar la recarga (ver ProveedoresCatalogo).
+                    setEstadoTabla('loading')
+                    setFiltros((f) => ({ ...f, ...patch }))
+                }}
                 categorias={categorias}
                 marcas={marcasFiltro}
                 contador={productos.length}

@@ -42,6 +42,17 @@ interface ConfirmarAccionDialogProps {
     variant?: 'destructive' | 'default'
     /** Toast de éxito tras confirmar (default: "Acción completada"). */
     successMessage?: string
+    /**
+     * ⭐ 25 Sep 2026 — **segunda línea**, para la consecuencia que merece su propio renglón
+     * (p. ej. «una entrega no se deshace»). Sin ella el aviso se apila dentro de `descripcion` y el
+     * modal se lee como un bloque plano de texto (reporte del usuario, 25 Sep 2026).
+     */
+    detalle?: string
+    /**
+     * ⭐ 25 Sep 2026 — **pase táctil del pie** (52/56 de la SPEC §1.1) para los puestos de dedo: el
+     * pie del kit mide `h-9` (36px). Aditivo: sin la prop, el modal queda igual que siempre.
+     */
+    tactil?: boolean
     onOpenChange: (open: boolean) => void
     onConfirm: () => Promise<{ error: string | null }>
 }
@@ -54,6 +65,8 @@ export function ConfirmarAccionDialog({
     cancelLabel = 'Cancelar',
     variant = 'default',
     successMessage = 'Acción completada',
+    detalle,
+    tactil = false,
     onOpenChange,
     onConfirm,
 }: ConfirmarAccionDialogProps) {
@@ -90,9 +103,12 @@ export function ConfirmarAccionDialog({
                         >
                             <TriangleAlert className="h-4 w-4" aria-hidden="true" />
                         </div>
-                        <div>
+                        <div className="space-y-1">
                             <DialogTitle>{titulo}</DialogTitle>
                             <DialogDescription>{descripcion}</DialogDescription>
+                            {detalle && (
+                                <p className="text-[12.5px] font-medium text-destructive">{detalle}</p>
+                            )}
                         </div>
                     </div>
                 </DialogHeader>
@@ -102,6 +118,7 @@ export function ConfirmarAccionDialog({
                         variant="outline"
                         onClick={() => onOpenChange(false)}
                         disabled={enviando}
+                        className={tactil ? 'min-h-[52px] px-5 text-[15px]' : undefined}
                     >
                         {cancelLabel}
                     </Button>
@@ -111,6 +128,7 @@ export function ConfirmarAccionDialog({
                         onClick={() => void confirmar()}
                         disabled={enviando}
                         data-accion="confirmar"
+                        className={tactil ? 'min-h-[56px] px-6 text-[16px] font-semibold' : undefined}
                     >
                         {enviando && (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />

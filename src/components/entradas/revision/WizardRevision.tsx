@@ -7,17 +7,29 @@
 // NO se usa "lote": el técnico elige la PARTIDA, revisa PIEZAS y guarda su AVANCE.
 // La revisión captura MARCA + atributos (huella) y aplica `valor_default` (RPM 7200);
 // NO resuelve el SKU (lo resuelve ALMACÉN).
+//
+// ⭐ MEJORA 24 Sep 2026 (Fase 2 · ④) — PASADA TÁCTIL. Esto es el puesto de trabajo del técnico:
+// *«el técnico no debe usar el mouse para operar toda esta vista»*. El ciclo se repite decenas de
+// veces por turno, así que cada paso se opera con el pulgar y sin puntería:
+//   · **PASÓ / NO PASÓ** son dos botones de 116px, no un `<select>` de 36px (era el gesto más
+//     repetido del módulo y el peor servido);
+//   · el **motivo** son bloques de 62px con su explicación, no una lista desplegable;
+//   · el **% de salud** se captura con teclado grande (−/+), no con un `input` de 96px;
+//   · **«← Atrás»** siempre visible en el encabezado (la salida natural del pulgar no es el `×`);
+//   · **hacer y cerrar**: si al guardar ya no queda nada por revisar, el modal se cierra solo.
+// Diseño aprobado: `DOCS/design/entradas/revision-puesto-tactil.html` §5.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Check, Minus, PackageCheck, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Pildora } from '@/components/data-table'
+import { cn } from '@/lib/utils'
 
 import { listarMarcasPorCategoria } from '@/lib/actions/productos'
 import {
@@ -40,6 +52,11 @@ interface WizardRevisionProps {
     entrada: Entrada | null
     /** Partida con la que abre (el acordeón pasa la elegida). */
     partidaInicialId?: string
+    /**
+     * ⭐ MEJORA 25 — abre la puerta de la liberación parcial para ESA partida. La monta el catálogo
+     * (una sola instancia del modal, dos puertas: el pie del wizard y el desglose de partidas).
+     */
+    onLiberar?: (entrada: Entrada, idPartida: string, idGrupo?: string) => void
     onGuardado?: () => void
 }
 
@@ -51,6 +68,7 @@ export function WizardRevision({
     onOpenChange,
     entrada,
     partidaInicialId,
+    onLiberar,
     onGuardado,
 }: WizardRevisionProps) {
     const [partidas, setPartidas] = useState<PartidaConAvance[]>([])
@@ -166,6 +184,15 @@ export function WizardRevision({
     const total = partidaActual?.cantidad_original ?? 0
     const turno = Math.max(0, Math.min(restantes, objetivo ? Math.floor(Number(objetivo)) : restantes))
     const motivoSel = motivos.find((m) => m.id === idMotivo) ?? null
+    /** ⭐ MEJORA 25 — aprobadas de esta partida que todavía NO tienen tanda. */
+    const liberables = useMemo(
+        () =>
+            (partidaActual?.huellas ?? []).reduce(
+                (s, h) => s + Math.max(0, h.cantidad_aprobada - h.cantidad_liberada),
+                0
+            ),
+        [partidaActual]
+    )
 
     const agregarPieza = () => {
         if (!marcaSel) {
@@ -198,38 +225,86 @@ export function WizardRevision({
 
     const quitarPieza = (i: number) => setItems((prev) => prev.filter((_, idx) => idx !== i))
 
-    const guardar = async () => {
+    /**
+     * ⭐ MEJORA 25 — persiste el turno y devuelve las partidas RECARGADAS (o `null` si no se pudo).
+     * Se separa de `guardar` porque ahora hay DOS consumidores: el guardado normal (que cierra si
+     * ya no queda nada) y el «guardar y liberar» (que NO cierra: sigue a la liberación).
+     */
+    const persistirTurno = async (): Promise<PartidaConAvance[] | null> => {
         if (!entrada || items.length === 0) {
             toast.error('Agrega al menos una pieza a tu avance.')
-            return
+            return null
         }
         if (items.some((p) => p.resultado === 'NO_PASA' && !p.id_motivo)) {
             toast.error('Toda pieza NO PASA necesita motivo.')
-            return
+            return null
         }
         setCargando(true)
         const res = await guardarAvanceRevision({ id_entrada: entrada.id, piezas: items })
         setCargando(false)
         if (!res.success) {
             toast.error(res.error ?? 'No se pudo guardar el avance.')
-            return
+            return null
         }
-        toast.success('Avance de revisión guardado')
         setItems([])
         const ps = await cargarPartidas(entrada.id)
         const p = ps.find((x) => x.id === partidaSel)
         if (p) setAtributos(aTexto(p.atributos))
         onGuardado?.()
+        return ps
+    }
+
+    const guardar = async () => {
+        const ps = await persistirTurno()
+        if (!ps) return
+        toast.success('Avance de revisión guardado')
+        // ⭐ ④ HACER Y CERRAR — si ya no queda NADA por revisar en la entrada, la acción resolvió y
+        // no hay siguiente paso: el modal se cierra solo en vez de dejar al técnico buscando el `×`.
+        // ⚠️ Si queda trabajo NO se cierra: este wizard guarda **turnos** (el técnico puede tomar
+        // otro bloque de piezas), y cerrar a la fuerza obligaría a reabrirlo en cada turno — que es
+        // exactamente el «estar cerrando» que el pedido quiere evitar.
+        if (!ps.some((x) => x.restantes > 0)) onOpenChange(false)
+    }
+
+    /**
+     * ⭐ MEJORA 25 (decisión 22.a) — **guardar NO es liberar**. El técnico guarda varias veces por
+     * turno; liberar entrega mercancía a otro puesto y es una decisión aparte. Este botón hace las
+     * dos cosas en el orden correcto: primero persiste el turno (si lo hay) para que las piezas
+     * recién capturadas entren en el conteo, y después abre la puerta de la liberación.
+     */
+    const guardarYLiberar = async () => {
+        if (!entrada) return
+        if (items.length > 0) {
+            const ps = await persistirTurno()
+            if (!ps) return
+            toast.success('Avance guardado · libera ahora lo que ya está listo')
+        }
+        onLiberar?.(entrada, partidaSel)
     }
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
                 <DialogHeader>
-                    <DialogTitle>
-                        Revisión — {entrada?.folio ?? ''}
-                        {partidaActual ? ` · Partida ${partidaActual.partida}` : ''}
-                    </DialogTitle>
+                    {/* ⭐ ④ El retroceso va en el ENCABEZADO, junto al pulgar: la salida natural de
+                        una superficie táctil no es el `×` de la esquina. */}
+                    <div className="flex items-center gap-3">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="min-h-11 shrink-0 px-4"
+                            onClick={() => onOpenChange(false)}
+                            disabled={cargando}
+                            title="Volver a la cola (no se guarda lo que no agregaste)"
+                        >
+                            <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                            Atrás
+                        </Button>
+                        <DialogTitle>
+                            Revisión — {entrada?.folio ?? ''}
+                            {partidaActual ? ` · Partida ${partidaActual.partida}` : ''}
+                        </DialogTitle>
+                    </div>
                 </DialogHeader>
 
                 {partidas.length === 0 ? (
@@ -240,7 +315,7 @@ export function WizardRevision({
                         <div className="space-y-1.5">
                             <Label>Partida</Label>
                             <select
-                                className="h-9 w-full rounded-md border bg-surface px-2 text-sm"
+                                className="h-11 w-full rounded-md border bg-surface px-2 text-sm"
                                 value={partidaSel}
                                 onChange={(e) => cambiarPartida(e.target.value)}
                             >
@@ -356,7 +431,7 @@ export function WizardRevision({
                                         Marca <span className="text-destructive">*</span>
                                     </Label>
                                     <select
-                                        className="h-9 w-full rounded-md border bg-surface px-2 text-sm"
+                                        className="h-11 w-full rounded-md border bg-surface px-2 text-sm"
                                         value={marcaSel}
                                         onChange={(e) => setMarcaSel(e.target.value)}
                                         disabled={cargando}
@@ -377,7 +452,7 @@ export function WizardRevision({
                                         </Label>
                                         {at.tipo === 'select' && at.opciones ? (
                                             <select
-                                                className="h-9 w-full rounded-md border bg-surface px-2 text-sm"
+                                                className="h-11 w-full rounded-md border bg-surface px-2 text-sm"
                                                 value={atributos[at.clave] ?? ''}
                                                 onChange={(e) =>
                                                     setAtributos((prev) => ({ ...prev, [at.clave]: e.target.value }))
@@ -394,6 +469,7 @@ export function WizardRevision({
                                         ) : (
                                             <Input
                                                 type={at.tipo === 'number' ? 'number' : 'text'}
+                                                className="h-11"
                                                 value={atributos[at.clave] ?? ''}
                                                 onChange={(e) =>
                                                     setAtributos((prev) => ({ ...prev, [at.clave]: e.target.value }))
@@ -411,90 +487,188 @@ export function WizardRevision({
                                 </p>
                             )}
 
-                            <div className="flex flex-wrap items-end gap-3">
-                                <div className="space-y-1">
-                                    <Label className="text-xs">Resultado</Label>
-                                    <select
-                                        className="h-9 rounded-md border bg-surface px-2 text-sm"
-                                        value={resultado}
-                                        onChange={(e) => setResultado(e.target.value as 'PASA' | 'NO_PASA')}
-                                        disabled={cargando}
-                                    >
-                                        <option value="PASA">PASA</option>
-                                        <option value="NO_PASA">NO PASA</option>
-                                    </select>
-                                </div>
-                                {resultado === 'NO_PASA' ? (
-                                    <>
-                                        <div className="space-y-1">
-                                            <Label className="text-xs">Motivo</Label>
-                                            <select
-                                                className="h-9 rounded-md border bg-surface px-2 text-sm"
-                                                value={idMotivo}
-                                                onChange={(e) => setIdMotivo(e.target.value)}
-                                                disabled={cargando}
-                                            >
-                                                <option value="">— elige motivo —</option>
-                                                {motivos.map((m) => (
-                                                    <option key={m.id} value={m.id}>
-                                                        {m.nombre}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        {motivoSel?.requiere_porcentaje ? (
-                                            <div className="space-y-1">
-                                                <Label className="text-xs">% salud</Label>
-                                                <Input
-                                                    type="number"
-                                                    min={0}
-                                                    max={100}
-                                                    className="w-24"
-                                                    value={porcentajeSalud}
-                                                    onChange={(e) => setPorcentajeSalud(e.target.value)}
-                                                    disabled={cargando}
-                                                />
-                                            </div>
-                                        ) : null}
-                                    </>
-                                ) : (
-                                    <div className="space-y-1">
-                                        <Label className="text-xs">N/S (opcional)</Label>
-                                        <Input
-                                            className="w-48"
-                                            placeholder="escanea el serial"
-                                            value={ns}
-                                            onChange={(e) => setNs(e.target.value)}
-                                            disabled={cargando}
-                                        />
-                                    </div>
-                                )}
-                                <div className="ml-auto">
-                                    <Button
+                            {/* ── ④ LA DECISIÓN: dos botones de dedo, no un `select` ─────────
+                                Es el gesto MÁS repetido del módulo (una vez por pieza) y el peor
+                                servido: un desplegable de 36px. En el piso se acierta sin mirar. */}
+                            <div className="space-y-2">
+                                <Label className="text-sm">¿Esta pieza pasó?</Label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
                                         type="button"
-                                        variant="outline"
-                                        onClick={agregarPieza}
-                                        disabled={cargando || !marcaSel || restantes <= items.length}
+                                        onClick={() => setResultado('PASA')}
+                                        disabled={cargando}
+                                        aria-pressed={resultado === 'PASA'}
+                                        className={cn(
+                                            'flex min-h-[116px] flex-col items-center justify-center gap-1 rounded-lg border-2 text-xl font-bold transition-colors',
+                                            resultado === 'PASA'
+                                                ? 'border-success/60 bg-success/15 text-success'
+                                                : 'border-border bg-surface-raised text-muted-foreground hover:bg-hover-background'
+                                        )}
                                     >
-                                        <Plus className="mr-1 h-4 w-4" /> Agregar pieza
-                                    </Button>
+                                        ✓ PASÓ
+                                        <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">
+                                            suma al avance
+                                        </span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setResultado('NO_PASA')}
+                                        disabled={cargando}
+                                        aria-pressed={resultado === 'NO_PASA'}
+                                        className={cn(
+                                            'flex min-h-[116px] flex-col items-center justify-center gap-1 rounded-lg border-2 text-xl font-bold transition-colors',
+                                            resultado === 'NO_PASA'
+                                                ? 'border-destructive/60 bg-destructive/15 text-destructive'
+                                                : 'border-border bg-surface-raised text-muted-foreground hover:bg-hover-background'
+                                        )}
+                                    >
+                                        ✕ NO PASÓ
+                                        <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">
+                                            pide motivo
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
+
+                            {resultado === 'NO_PASA' ? (
+                                <div className="space-y-3 rounded-lg border border-destructive/30 p-3">
+                                    <div className="space-y-2">
+                                        <Label className="text-sm">¿Por qué no pasó?</Label>
+                                        <div className="grid gap-2">
+                                            {motivos.map((m, i) => (
+                                                <button
+                                                    key={m.id}
+                                                    type="button"
+                                                    onClick={() => setIdMotivo(m.id)}
+                                                    disabled={cargando}
+                                                    aria-pressed={idMotivo === m.id}
+                                                    className={cn(
+                                                        'flex min-h-[62px] items-center gap-3 rounded-md border px-4 text-left text-sm font-semibold transition-colors',
+                                                        idMotivo === m.id
+                                                            ? 'border-warning bg-warning/10'
+                                                            : 'border-border bg-surface-raised hover:bg-hover-background'
+                                                    )}
+                                                >
+                                                    <span className="font-mono text-xs text-muted-foreground">
+                                                        {i + 1}
+                                                    </span>
+                                                    {m.nombre}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {motivoSel?.requiere_porcentaje && (
+                                        <div className="space-y-2 rounded-md border border-warning/50 bg-warning/10 p-3">
+                                            <Label className="text-xs uppercase tracking-wide text-warning">
+                                                {motivoSel.nombre} · indica el porcentaje
+                                            </Label>
+                                            {/* ④ Teclado grande: el % es un dato de dos dígitos y el
+                                                dedo no tiene puntería para un `input` de 96px. */}
+                                            <div className="grid grid-cols-[64px_1fr_64px] items-center gap-3">
+                                                <button
+                                                    type="button"
+                                                    aria-label="Bajar 5 por ciento"
+                                                    disabled={cargando}
+                                                    onClick={() =>
+                                                        setPorcentajeSalud((v) =>
+                                                            String(Math.max(0, Number(v || 0) - 5))
+                                                        )
+                                                    }
+                                                    className="flex min-h-[64px] items-center justify-center rounded-md border border-border bg-surface-raised hover:bg-hover-background"
+                                                >
+                                                    <Minus className="h-6 w-6" aria-hidden="true" />
+                                                </button>
+                                                <div className="text-center text-4xl font-bold tabular-nums">
+                                                    {porcentajeSalud || '—'}
+                                                    <span className="text-lg">%</span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    aria-label="Subir 5 por ciento"
+                                                    disabled={cargando}
+                                                    onClick={() =>
+                                                        setPorcentajeSalud((v) =>
+                                                            String(Math.min(100, Number(v || 0) + 5))
+                                                        )
+                                                    }
+                                                    className="flex min-h-[64px] items-center justify-center rounded-md border border-border bg-surface-raised hover:bg-hover-background"
+                                                >
+                                                    <Plus className="h-6 w-6" aria-hidden="true" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="space-y-1">
+                                    <Label className="text-xs">N/S (opcional)</Label>
+                                    <Input
+                                        className="h-11 w-full sm:w-64"
+                                        placeholder="escanea el serial"
+                                        value={ns}
+                                        onChange={(e) => setNs(e.target.value)}
+                                        disabled={cargando}
+                                    />
+                                </div>
+                            )}
+
+                            {/* ④ «Registrar y seguir»: la acción resuelve y deja lista la siguiente
+                                pieza — no hay que cerrar nada para continuar el turno. */}
+                            <Button
+                                type="button"
+                                className="min-h-[64px] w-full text-base"
+                                onClick={agregarPieza}
+                                disabled={cargando || !marcaSel || restantes <= items.length}
+                            >
+                                <Plus className="mr-1.5 h-5 w-5" aria-hidden="true" />
+                                {resultado === 'PASA' ? 'Registrar PASÓ y seguir' : 'Registrar NO PASÓ y seguir'}
+                                <span className="ml-1.5 opacity-80">
+                                    ({items.length + 1} de {turno || restantes})
+                                </span>
+                            </Button>
                         </div>
                     </div>
                 )}
 
-                <DialogFooter>
-                    <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={cargando}>
-                        Cerrar
+                <DialogFooter className="gap-2">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="min-h-11"
+                        onClick={() => onOpenChange(false)}
+                        disabled={cargando}
+                    >
+                        <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                        Atrás
+                    </Button>
+                    {/* ⭐ MEJORA 25 (decisión 22.a) — DOS acciones, no una: guardar es la bitácora del
+                        turno; liberar es la ENTREGA a otro puesto. Si se fusionaran, cada guardado
+                        parcial sacaría mercancía del expediente sin que nadie lo haya pedido. */}
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="min-h-[52px] px-5 text-[15px]"
+                        onClick={guardarYLiberar}
+                        disabled={cargando || partidas.length === 0 || liberables === 0}
+                        title={
+                            liberables === 0
+                                ? 'No hay piezas aprobadas sin liberar en esta partida.'
+                                : `${liberables} pieza(s) aprobadas pueden pasar ya a limpieza, sin esperar al resto.`
+                        }
+                    >
+                        <PackageCheck className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                        Liberar {liberables} a acondicionamiento
                     </Button>
                     <Button
                         type="button"
+                        className="min-h-[52px] flex-1 sm:flex-none"
                         onClick={guardar}
                         disabled={cargando || items.length === 0 || partidas.length === 0}
                     >
-                        <Check className="mr-1 h-4 w-4" />
-                        {cargando ? 'Guardando…' : `Guardar avance (${items.length} pieza${items.length === 1 ? '' : 's'})`}
+                        <Check className="mr-1.5 h-5 w-5" aria-hidden="true" />
+                        {cargando
+                            ? 'Guardando…'
+                            : `Guardar avance (${items.length} pieza${items.length === 1 ? '' : 's'})`}
                     </Button>
                 </DialogFooter>
             </DialogContent>

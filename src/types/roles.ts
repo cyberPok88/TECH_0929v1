@@ -111,35 +111,62 @@ export interface RespuestaAccion {
 // (el admin pudo editarlos), por eso la semilla vive aquí.
 // ⚠️ Al implementar/revisar: verificar esta constante contra la BD real (sembrada con
 // la matriz nueva) y ajustarla si diverge — ver GUIAS/10/NOTAS_REVISION_SEMILLA_RBAC.md.
+//
+// ⭐ ALINEADA CONTRA LA BD VIVA (24 Sep 2026 · MEJORA 26) — estaba desactualizada en 10
+// filas que las guías 1.3/1.4/1.5/1.6 sembraron DESPUÉS del snapshot del 01 Sep. Como el
+// editor de roles usa esta constante como **BASE bloqueada** y `restablecerPermisosRol` la
+// aplica tal cual, un «Restablecer a semilla» BORRABA permisos que el flujo necesita:
+//   · almacenista → inventario/existencias e inventario-fisico (sin ellos el alta no puede
+//     escribir `lotes` + `movimientos_inventario`: la RLS los exige) + `aprobar` en entradas/alta
+//   · recepcionista → /dashboard/compras (crear: sin él no nace la nota NC)
+//   · vendedor/cajero → catalogos/clientes (1.3) · cajero técnico acondicionador →
+//     inventario/existencias (lectura, 1.5) · técnico → productos `crear` (1.2)
+// Verificación: la consulta de §0.14 de `GUIAS/18/docs/bd-entradas.md`.
 // ═══════════════════════════════════════════════════════════════════════════════
 export const PERMISOS_SEMILLA: Record<string, PermisoPayload[]> = {
     vendedor: [
         { href: '/dashboard', acciones: ['ver'] },
+        { href: '/dashboard/catalogos/clientes', acciones: ['ver'] },
         { href: '/dashboard/catalogos/productos', acciones: ['ver', 'exportar'] },
         { href: '/dashboard/catalogos/proveedores', acciones: ['ver'] },
+        { href: '/dashboard/inventario/existencias', acciones: ['ver'] },
     ],
     almacenista: [
         { href: '/dashboard', acciones: ['ver'] },
         { href: '/dashboard/catalogos/productos', acciones: ['ver', 'crear', 'editar', 'eliminar', 'exportar'] },
         { href: '/dashboard/catalogos/proveedores', acciones: ['ver', 'crear'] },
+        // ⚠️ `aprobar` (Vo.Bo. de Almacén · mapa §5.5/§7.2) NO vive aquí: es una acción
+        // RESERVADA, fuera del catálogo del editor (R4 · decisión 13). La siembra la BD
+        // (`bd-entradas.md §0.14`) y `guardar_permisos_rol` la PRESERVA al guardar
+        // (g10_m26 · `bd-roles.md §2.5`) — antes, editar el rol la BORRABA.
         { href: '/dashboard/entradas/alta', acciones: ['ver', 'editar'] },
+        { href: '/dashboard/inventario/existencias', acciones: ['ver', 'crear', 'editar', 'eliminar', 'exportar'] },
+        // `aprobar` del conteo físico: misma condición de acción reservada que la de arriba.
+        { href: '/dashboard/inventario/inventario-fisico', acciones: ['ver', 'crear', 'editar', 'eliminar', 'exportar'] },
     ],
     cajero: [
         { href: '/dashboard', acciones: ['ver'] },
+        { href: '/dashboard/catalogos/clientes', acciones: ['ver'] },
+        { href: '/dashboard/inventario/existencias', acciones: ['ver'] },
     ],
     recepcionista: [
         { href: '/dashboard', acciones: ['ver'] },
         { href: '/dashboard/entradas/recepcion', acciones: ['ver', 'crear', 'editar'] },
         { href: '/dashboard/catalogos/productos', acciones: ['ver', 'crear'] },
         { href: '/dashboard/catalogos/proveedores', acciones: ['ver', 'crear'] },
+        // `crear` en Compras es lo que permite generar la nota NC desde el flujo (1.4/1.6).
+        { href: '/dashboard/compras', acciones: ['ver', 'crear'] },
+        { href: '/dashboard/inventario/existencias', acciones: ['ver'] },
     ],
     tecnico: [
         { href: '/dashboard', acciones: ['ver'] },
         { href: '/dashboard/entradas/revision', acciones: ['ver', 'editar'] },
-        { href: '/dashboard/catalogos/productos', acciones: ['ver'] },
+        { href: '/dashboard/catalogos/productos', acciones: ['ver', 'crear'] },
+        { href: '/dashboard/inventario/existencias', acciones: ['ver'] },
     ],
     acondicionador: [
         { href: '/dashboard', acciones: ['ver'] },
         { href: '/dashboard/entradas/acondicionamiento', acciones: ['ver', 'editar'] },
+        { href: '/dashboard/inventario/existencias', acciones: ['ver'] },
     ],
 }

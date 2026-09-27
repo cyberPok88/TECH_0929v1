@@ -17,11 +17,18 @@ export function FiltroMultiselect({ label, opciones, valores, onValoresChange, d
         onValoresChange(valores.includes(v) ? valores.filter((x) => x !== v) : [...valores, v])
 
     return (
-        <fieldset disabled={disabled} className="flex flex-col gap-1">
+        <fieldset disabled={disabled} className="flex w-full flex-col gap-1 md:w-auto">
             <legend className="text-xs text-muted-foreground">{label}</legend>
             <div className="flex flex-wrap gap-x-4 gap-y-1">
                 {opciones.map((o) => (
-                    <label key={o.valor} className="flex cursor-pointer items-center gap-1.5 text-sm">
+                    // ⭐ MEJORA 26 Sep 2026 — el checkbox mide 14×14 (no se puede agrandar
+                    // sin romper la convención visual de checkbox), pero el OBJETIVO
+                    // táctil es la etiqueta completa: `min-h-11` en móvil le da los 44px
+                    // de la Ley 5 y `md:min-h-0` devuelve la densidad de escritorio.
+                    <label
+                        key={o.valor}
+                        className="flex min-h-11 cursor-pointer items-center gap-1.5 text-sm md:min-h-0"
+                    >
                         <input
                             type="checkbox"
                             checked={valores.includes(o.valor)}

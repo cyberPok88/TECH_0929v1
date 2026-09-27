@@ -9,10 +9,12 @@
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { ArrowLeft } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Spinner } from '@/components/ui/spinner'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 
@@ -131,7 +133,19 @@ export function EntradaModal({ open, onOpenChange, modo, entrada = null, onGuard
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
-                <DialogHeader>
+                <DialogHeader className="flex-row items-center gap-3">
+                    {/* ⭐ MEJORA 24 Sep 2026 — LA SALIDA ES UN BOTÓN CON ETIQUETA, no la × de la
+                        esquina (ley L13: el retroceso siempre visible, al alcance del pulgar). */}
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => onOpenChange(false)}
+                        disabled={cargando}
+                        className="min-h-11 gap-1.5 px-3 text-[14px]"
+                    >
+                        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                        Atrás
+                    </Button>
                     <DialogTitle>
                         {modo === 'editar' ? `Editar ${entrada?.folio ?? 'entrada'}` : 'Nueva entrada'}
                     </DialogTitle>
@@ -145,12 +159,12 @@ export function EntradaModal({ open, onOpenChange, modo, entrada = null, onGuard
                         />
                     </div>
 
-                    <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
+                    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-2 px-4 py-3">
                         <div className="space-y-0.5">
-                            <Label htmlFor="sin-revision" className="cursor-pointer text-sm">
+                            <Label htmlFor="sin-revision" className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.09em] text-muted-foreground">
                                 Mercancía nueva (sin revisión técnica)
                             </Label>
-                            <p className="text-xs text-muted-foreground">
+                            <p className="text-[12.5px] text-muted-foreground">
                                 Salta la revisión pieza a pieza y va directo a acondicionamiento.
                             </p>
                         </div>
@@ -161,9 +175,11 @@ export function EntradaModal({ open, onOpenChange, modo, entrada = null, onGuard
                         />
                     </div>
 
-                    <div className="space-y-1.5">
-                        <Label>Partidas</Label>
-                        <p className="text-xs text-muted-foreground">
+                    <div className="space-y-2">
+                        <Label className="font-mono text-[11px] uppercase tracking-[0.09em] text-muted-foreground">
+                            Partidas
+                        </Label>
+                        <p className="text-[12.5px] text-muted-foreground">
                             Elige la categoría de cada línea. Marca y atributos (capacidad, tipo, bus…) se
                             capturan en revisión al resolver el SKU.
                         </p>
@@ -176,10 +192,13 @@ export function EntradaModal({ open, onOpenChange, modo, entrada = null, onGuard
                     </div>
 
                     <div className="space-y-1.5">
-                        <Label htmlFor="notas">Notas</Label>
+                        <Label htmlFor="notas" className="font-mono text-[11px] uppercase tracking-[0.09em] text-muted-foreground">
+                            Notas
+                        </Label>
                         <Input
                             id="notas"
                             placeholder="Opcional"
+                            className="h-11 text-[15px]"
                             value={form.notas}
                             onChange={(e) => actualizar('notas', e.target.value)}
                             disabled={cargando}
@@ -188,12 +207,24 @@ export function EntradaModal({ open, onOpenChange, modo, entrada = null, onGuard
 
                     {errorServidor && <p className="text-sm text-destructive">{errorServidor}</p>}
 
-                    <DialogFooter>
-                        <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={cargando}>
+                    <DialogFooter className="gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => onOpenChange(false)}
+                            disabled={cargando}
+                            className="min-h-[52px] px-5 text-[15px]"
+                        >
                             Cancelar
                         </Button>
-                        <Button type="submit" disabled={cargando}>
-                            {cargando ? 'Guardando…' : 'Guardar entrada'}
+                        {/* La acción dominante: la que cierra (ley L12). */}
+                        <Button
+                            type="submit"
+                            disabled={cargando}
+                            className="min-h-[56px] flex-1 px-6 text-[16px] font-semibold sm:flex-none"
+                        >
+                            {cargando && <Spinner className="mr-2 text-primary-foreground" />}
+                            {cargando ? 'Registrando…' : 'Registrar entrada'}
                         </Button>
                     </DialogFooter>
                 </form>

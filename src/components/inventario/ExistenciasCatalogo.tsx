@@ -108,6 +108,12 @@ export function ExistenciasCatalogo() {
 
     const manejarFiltros = useCallback(
         (patch: Partial<FiltrosExistencias>) => {
+            // ⭐ MEJORA 26 Sep 2026 — la recarga se ANUNCIA. El efecto que trae los datos no
+            // puede poner `loading` (regla del proyecto: cero setState en efectos), así que lo
+            // pone el manejador, que sí es un event handler. Con filas en pantalla el
+            // DataTable atenúa y dice «Actualizando…» en vez de borrarlas; antes, filtrar no
+            // daba NINGUNA señal y la tabla seguía mostrando filas viejas.
+            setEstadoTabla('loading')
             setFiltros((prev) => ({ ...prev, ...patch }))
             setPagina(1)
             limpiar()

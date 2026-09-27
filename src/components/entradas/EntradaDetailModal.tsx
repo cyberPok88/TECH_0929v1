@@ -7,7 +7,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useEffect, useState } from 'react'
-import { Check, Clock, FileDown } from 'lucide-react'
+import { ArrowLeft, Check, Clock, FileDown } from 'lucide-react'
 
 import { Pildora } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
@@ -49,7 +49,18 @@ export function EntradaDetailModal({ open, onOpenChange, entrada }: EntradaDetai
         <>
             <Dialog open={open} onOpenChange={onOpenChange}>
                 <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
-                    <DialogHeader>
+                    <DialogHeader className="flex-row items-center gap-3">
+                        {/* ⭐ MEJORA 24 Sep 2026 — «el de ver»: el expediente también tiene su
+                            retroceso visible (ley L13), no solo la × de la esquina. */}
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => onOpenChange(false)}
+                            className="min-h-11 gap-1.5 px-3 text-[14px]"
+                        >
+                            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                            Atrás
+                        </Button>
                         <DialogTitle>
                             {entrada?.folio ?? 'Entrada'} — {entrada?.proveedor_nombre ?? '—'}
                         </DialogTitle>
@@ -171,14 +182,24 @@ export function EntradaDetailModal({ open, onOpenChange, entrada }: EntradaDetai
                             </table>
                         </div>
 
-                        <div className="flex justify-end">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => onOpenChange(false)}
+                                className="min-h-[52px] px-5 text-[15px]"
+                            >
+                                Cerrar
+                            </Button>
+                            {/* La acción del paso: imprimir el documento (56px). */}
                             <Button
                                 type="button"
                                 variant="outline"
                                 disabled={!entrada}
                                 onClick={() => setImprimir(true)}
+                                className="min-h-[56px] gap-2 px-6 text-[16px] font-semibold"
                             >
-                                <FileDown className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                <FileDown className="h-4 w-4" aria-hidden="true" />
                                 Imprimir / PDF
                             </Button>
                         </div>

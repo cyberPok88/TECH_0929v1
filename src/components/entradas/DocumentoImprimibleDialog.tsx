@@ -10,7 +10,7 @@
 
 import { useRef } from 'react'
 import type { ReactNode } from 'react'
-import { Download } from 'lucide-react'
+import { ArrowLeft, Download } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -42,7 +42,17 @@ export function DocumentoImprimibleDialog({
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
-                <DialogHeader>
+                <DialogHeader className="flex-row items-center gap-3">
+                    {/* ⭐ MEJORA 24 Sep 2026 — retroceso visible también aquí (ley L13). */}
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => onOpenChange(false)}
+                        className="min-h-11 gap-1.5 px-3 text-[14px]"
+                    >
+                        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                        Atrás
+                    </Button>
                     <DialogTitle>{titulo}</DialogTitle>
                 </DialogHeader>
                 {/* Fondo blanco + texto negro: el PDF captura exactamente este nodo. */}
@@ -50,8 +60,13 @@ export function DocumentoImprimibleDialog({
                     {children}
                 </div>
                 <div className="flex justify-end gap-2">
-                    <Button type="button" variant="default" onClick={() => void guardarPdf()}>
-                        <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                    <Button
+                        type="button"
+                        variant="default"
+                        onClick={() => void guardarPdf()}
+                        className="min-h-[56px] gap-2 px-6 text-[16px] font-semibold"
+                    >
+                        <Download className="h-4 w-4" aria-hidden="true" />
                         Guardar PDF
                     </Button>
                 </div>

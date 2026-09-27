@@ -153,11 +153,11 @@ export function NotasCompraCatalogo() {
     const cancelable = (n: NotaCompra): boolean =>
         !n.es_cancelada && n.estado_fisico === 'por_recibir' && n.saldo_pendiente === n.total
 
-    // ── Apertura de diálogos: directa (toolbar) vs diferida (menú ⋮) ────────────
-    // FIX VF 05 Sep — overlay fantasma: Radix, al abrir un Dialog en el MISMO tick
-    // en que el DropdownMenu ⋮ cierra (~150ms), deja su overlay colgado (página
-    // "congelada"). Las acciones del menú difieren 160ms; la toolbar NO pasa por el
-    // menú → abre directo y funciona (patrón 1.1/1.2).
+    // ── Apertura de diálogos ───────────────────────────────────────────────────
+    // FIX VF 05 Sep → ⭐ MEJORA 23 Sep 2026: el retardo de 160 ms que vivía AQUÍ (para que el
+    // menú ⋮ no dejara el overlay fantasma de Radix) ya lo aplica el **kit**
+    // (`crearColumnaAcciones` difiere las secundarias). Este archivo ya no lo repite: con los dos
+    // retardos, Editar/Pagar/Cancelar tardaban 320 ms. Abren directo.
     const cargarEdicion = useCallback((n: NotaCompra) => {
         void obtenerNotaCompra(n.id).then((res) => {
             if (!res.success || !res.data) {
@@ -168,30 +168,18 @@ export function NotasCompraCatalogo() {
         })
     }, [])
 
-    const abrirDiferido = useCallback((fn: () => void) => {
-        window.setTimeout(fn, 160)
-    }, [])
+    const abrirEditar = useCallback((n: NotaCompra) => cargarEdicion(n), [cargarEdicion])
 
-    const abrirEditar = useCallback(
-        (n: NotaCompra) => abrirDiferido(() => cargarEdicion(n)),
-        [abrirDiferido, cargarEdicion]
-    )
-
-    const abrirPago = useCallback(
-        (n: NotaCompra) => abrirDiferido(() => setDialogo({ tipo: 'pago', nota: n })),
-        [abrirDiferido]
-    )
+    const abrirPago = useCallback((n: NotaCompra) => setDialogo({ tipo: 'pago', nota: n }), [])
 
     const abrirCancelar = useCallback(
-        (notasSeleccion: NotaCompra[]) =>
-            abrirDiferido(() => setDialogo({ tipo: 'cancelar', notas: notasSeleccion })),
-        [abrirDiferido]
+        (notasSeleccion: NotaCompra[]) => setDialogo({ tipo: 'cancelar', notas: notasSeleccion }),
+        []
     )
 
     // ⭐ MEJORA 22 Sep 2026 — «Ver» ya no navega a `/dashboard/compras/{id}`: abre la nota en
-    // MODAL y no se pierde el listado (filtros, página, selección).
-    // Abre DIRECTO, no diferido: el `crearColumnaAcciones` del kit pinta todas las acciones como
-    // botones inline — el menú ⋮ que motivó el retardo de 160 ms ya no existe en esta tabla.
+    // MODAL y no se pierde el listado (filtros, página, selección). Es acción PRIMARIA (inline),
+    // así que no pasa por el menú y abre directo.
     const abrirVer = useCallback((n: NotaCompra) => setDetalleId(n.id), [])
 
     // Columna de acciones (Ver · ⋮ Editar/Pagar/Cancelar).

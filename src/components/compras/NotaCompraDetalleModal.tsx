@@ -18,6 +18,9 @@
 // del diálogo, con su RBAC); solo aporta el marco y quita los botones de navegación.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { ArrowLeft } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { NotaCompraFicha } from '@/components/compras/NotaCompraFicha'
 
@@ -39,6 +42,19 @@ export function NotaCompraDetalleModal({ open, onOpenChange, notaId, onCambio }:
                         accesibilidad del diálogo (Radix exige un DialogTitle). */}
                     <DialogTitle className="sr-only">Nota de compra</DialogTitle>
                 </DialogHeader>
+                {/* ⭐ MEJORA 24 Sep 2026 — la nota se abre DESDE Recepción (píldora del folio o
+                    «Crear»), así que su marco también ofrece el retroceso visible del puesto
+                    (ley L13) en vez de depender de la × de la esquina.
+                    ⚠️ Es un componente de la Guía 1.4: el cambio es de MARCO, no del display. */}
+                <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => onOpenChange(false)}
+                    className="w-fit min-h-11 gap-1.5 px-3 text-[14px]"
+                >
+                    <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                    Atrás
+                </Button>
                 {/* Se monta solo con el diálogo abierto: la ficha no pide datos en balde. */}
                 {notaId && <NotaCompraFicha key={notaId} notaId={notaId} enModal onCambio={onCambio} />}
             </DialogContent>

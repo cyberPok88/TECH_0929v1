@@ -1,0 +1,613 @@
+'use client'
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PARTIDAS DE AVANCE — la tabla de los ÍTEMS de una entrada (Guía 1.6 · Fase 2)
+//
+// ⭐ EXTRACCIÓN 24 Sep 2026 (usuario) — el pedido: *«en la columna estado aparece la píldora
+// del estado, en las que aparece en revisión técnica que sea un link para abrir modal para
+// mostrar el avance de la revisión … en la etapa 2 se resuelve cómo mostrar la tabla de los
+// detalles de los ítems»*. En vez de copiar la tabla del desglose del técnico, sale de
+// `PartidasRevision` a este componente presentacional y las DOS superficies la consumen:
+//
+//   · `PartidasRevision`      → el desglose del acordeón de la cola del técnico (con sus puertas);
+//   · `AvanceRevisionModal`   → el mismo avance en **solo lectura** desde Recepción.
+//
+// El contrato es el de la etapa: la huella que produjo la REVISIÓN (una línea por grupo — una
+// partida de 100 discos puede rendir 2TB y 4TB: se pintan todas), el avance «revisadas/total» con
+// barra de tramos, y la DEV **contada** («2 malas», no «Con malas»).
+//
+// ⚠️ En solo lectura NO se pintan controles muertos: sin `onVerDev` la píldora queda píldora, y
+// sin `onIniciar`/`onVerResultado`/`onLiberar` la columna de acciones no existe. Un botón que no
+// hace nada enseña a ignorar esa zona (SISTEMA_COMPONENTES §8).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { PackageCheck, Play } from 'lucide-react'
+
+import { Pildora } from '@/components/data-table'
+import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
+import {
+    BarraAvance,
+    formatearFechaEntrada,
+    huellaDeclarada,
+    lineasDePartidas,
+    valoresAtributos,
+} from '@/components/entradas/columnas-entrada'
+import { cn } from '@/lib/utils'
+import { puedeLiberar } from '@/types/entradas'
+import type { Entrada, PartidaConAvance } from '@/types/entradas'
+
+interface PartidasAvanceProps {
+    entrada: Entrada
+    /** Ya cargadas por quien hospeda: cada superficie tiene su propia carga. */
+    partidas: PartidaConAvance[]
+    cargando?: boolean
+    /** ② La píldora «n malas» es botón cuando hay quien abra esa devolución (L3). */
+    onVerDev?: (entrada: Entrada, idPartida: string) => void
+    /** Abre el wizard de revisión en esa partida. */
+    onIniciar?: (idPartida: string) => void
+    /** Abre el resultado de una partida ya cerrada. */
+    onVerResultado?: (entrada: Entrada) => void
+    /**
+     * ⭐ FIX 25 Sep 2026 (30-bis) — **puesto de dedo**. La SPEC lo manda dos veces: **§1.1** (en fila y
+     * navegación el objetivo es **44**, y en un puesto de piso la altura **se sobreescribe**) y **§2.3**
+     * («en un paso de puesto de piso la altura se sobreescribe — el tamaño no se cambia en el kit»).
+     * El desglose se quedaba en el `sm` del kit (h-8 = **32px**), que es densidad de **ratón**: 32px
+     * para un dedo. Lo enciende la cola que se opera con el dedo (Revisión), **no** el ancho de la
+     * pantalla — la tablet en horizontal recibe la densidad de escritorio (SPEC §1.1 · L8).
+     */
+    tactil?: boolean
+    /**
+     * ⭐ MEJORA 25 — libera a acondicionamiento lo aprobado de ESA partida sin esperar a las demás.
+     * Segunda puerta al mismo modal que el pie del wizard (una superficie, dos profundidades).
+     */
+    /**
+     * ⭐ MEJORA 25/28/30 — libera a acondicionamiento lo aprobado. Tres profundidades, **el mismo
+     * modal** (`LiberarAvanceModal` con su filtro): la LÍNEA (su grupo, tercer argumento), la
+     * PARTIDA (segundo argumento) y la ENTRADA ENTERA (`idPartida = null` → sin filtro), que es la
+     * puerta que evita abrir el modal 20 veces en una entrada de 20 partidas.
+     */
+    onLiberar?: (entrada: Entrada, idPartida: string | null, idGrupo?: string) => void
+    className?: string
+}
+
+/** El estado de la PARTIDA en el idioma de la etapa (no el del documento de entrada). */
+function estadoDePartida(p: PartidaConAvance): {
+    texto: string
+    tono: 'neutro' | 'listo' | 'advertencia' | 'peligro'
+} {
+    if (p.revisadas === 0) return { texto: 'Pendiente', tono: 'advertencia' }
+    if (p.restantes === 0) return { texto: 'Cerrada', tono: 'listo' }
+    return { texto: 'En curso', tono: p.dev_cantidad > 0 ? 'peligro' : 'advertencia' }
+}
+
+/** Un hito del timeline: la fecha ya formateada, o `—` si esa etapa no ocurrió. */
+function Hito({ etiqueta, fecha }: { etiqueta: string; fecha: string | null }) {
+    const hecha = Boolean(fecha)
+    return (
+        <span className="inline-flex items-center gap-1.5">
+            <span
+                aria-hidden="true"
+                className={cn('size-1.5 rounded-full', hecha ? 'bg-acc-entradas' : 'bg-border')}
+            />
+            <span
+                className={cn(
+                    'font-mono text-[9.5px] uppercase tracking-[0.12em]',
+                    hecha ? 'text-foreground/80' : 'text-muted-foreground/70'
+                )}
+            >
+                {etiqueta}
+            </span>
+            <span
+                className={cn(
+                    'text-[11.5px] tabular-nums',
+                    hecha ? 'text-foreground' : 'text-muted-foreground/50'
+                )}
+            >
+                {hecha ? formatearFechaEntrada(fecha as string) : '—'}
+            </span>
+        </span>
+    )
+}
+
+const TH = 'px-2.5 py-1.5 font-medium'
+
+export function PartidasAvance({
+    entrada,
+    partidas,
+    cargando = false,
+    tactil = false,
+    onVerDev,
+    onIniciar,
+    onVerResultado,
+    onLiberar,
+    className,
+}: PartidasAvanceProps) {
+    if (cargando) return <Spinner etiqueta="Cargando partidas…" className="py-1" />
+    if (partidas.length === 0) return <p className="text-sm text-muted-foreground">Sin partidas.</p>
+
+    /** Sin puertas no hay columna de acciones. */
+    const hayAcciones = Boolean(onIniciar || onVerResultado || onLiberar)
+    const faltanTotal = Math.max(
+        0,
+        entrada.piezas_total - entrada.piezas_aprobadas - entrada.devolucion_total
+    )
+    /**
+     * ⭐ MEJORA 30 — lo aprobado **sin liberar** de TODA la entrada: la cifra de «Liberar todo».
+     * Es la Σ de las mismas cifras que ofrecen las filas de producto y de partida.
+     */
+    const liberablesEntrada = partidas.reduce(
+        (s, p) =>
+            s +
+            p.huellas.reduce(
+                (t, h) => t + Math.max(0, h.cantidad_aprobada - h.cantidad_liberada),
+                0
+            ),
+        0
+    )
+
+    return (
+        <div className={cn('flex flex-col gap-3', className)}>
+            {/* ── ⭐ MEJORA 30 (usuario) — LA BARRA DE LA ENTRADA ───────────────
+                Tres profundidades de liberación y **el mismo modal**: la LÍNEA (su grupo), la
+                PARTIDA (todos sus productos) y la ENTRADA entera. Es la puerta que evita abrir el
+                modal 20 veces: *«son 20 partidas diferentes, dar click a cada partida para liberar»*.
+                Aquí va solo lo que el pie de la tabla NO dice —cuánto queda sin liberar— porque el
+                pie ya lleva los totales (SPEC §2.6: dos lugares diciendo lo mismo es peor que uno). */}
+            {onLiberar && puedeLiberar(entrada.estado) && liberablesEntrada > 0 && (
+                <div
+                    className={cn(
+                        'flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface-raised px-3 py-2.5',
+                        // ⭐ FIX 30-bis — en puesto de dedo, 44 (SPEC §1.1/§2.3) sin tocar el kit.
+                        tactil && '[&_button]:min-h-11'
+                    )}
+                >
+                    <span className="text-[12.5px] text-muted-foreground">
+                        <span className="font-semibold tabular-nums text-foreground">
+                            {liberablesEntrada}
+                        </span>{' '}
+                        pieza{liberablesEntrada === 1 ? '' : 's'} aprobada
+                        {liberablesEntrada === 1 ? '' : 's'} sin liberar en {entrada.partidas_count}{' '}
+                        {entrada.partidas_count === 1 ? 'producto' : 'productos'}
+                    </span>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onLiberar(entrada, null)}
+                        title="Abre la liberación con TODOS los productos de la entrada ya cargados: eliges las cantidades en el mismo modal."
+                    >
+                        <PackageCheck className="mr-1 h-3.5 w-3.5" />
+                        Liberar todo ({liberablesEntrada})
+                    </Button>
+                </div>
+            )}
+            {/* ── Una sola tabla alineada, un solo encabezado ───────────────── */}
+            <div className="overflow-hidden rounded-md border border-border bg-surface-raised shadow-premium-sm">
+                <table className="w-full text-[12.5px]">
+                    <thead className="border-b border-border bg-surface text-[9.5px] uppercase tracking-[0.09em] text-muted-foreground">
+                        <tr>
+                            <th
+                                className={cn(TH, 'w-14')}
+                                title="En la fila de PARTIDA, el número de la partida declarada; en las de producto, el consecutivo del producto en la entrada."
+                            >
+                                #
+                            </th>
+                            <th
+                                className={cn(TH, 'text-left')}
+                                title="En la fila de PARTIDA, lo declarado en recepción. En las de producto, la huella (marca + atributos) que produjo la REVISIÓN."
+                            >
+                                Producto
+                            </th>
+                            <th
+                                className={cn(TH, 'w-16')}
+                                title="Piezas DE ESTE PRODUCTO: aprobadas + devueltas. En una partida sin revisar, lo declarado en recepción."
+                            >
+                                Recib.
+                            </th>
+                            <th
+                                className={cn(TH, 'w-32')}
+                                title="Aprobadas + devueltas de ESTE producto, sobre las piezas de esta línea"
+                            >
+                                Revisadas
+                            </th>
+                            <th
+                                className={cn(TH, 'w-16')}
+                                title="Piezas aprobadas de este producto (se pagarán)"
+                            >
+                                Aprob.
+                            </th>
+                            <th
+                                className={cn(TH, 'w-24')}
+                                title="Piezas rechazadas de este producto — abre la devolución"
+                            >
+                                DEV
+                            </th>
+                            <th
+                                className={cn(TH, 'w-16')}
+                                title="Piezas que faltan por revisar en la PARTIDA: nadie las revisó, así que todavía no tienen huella y no se reparten por línea."
+                            >
+                                Faltan
+                            </th>
+                            <th
+                                className={cn(TH, 'w-28')}
+                                title="Estado de la PARTIDA en la etapa (sus líneas lo comparten: es el mismo hecho)"
+                            >
+                                Estado
+                            </th>
+                            {hayAcciones && (
+                                <th className={cn(TH, 'w-28')}>
+                                    <span className="sr-only">Acciones</span>
+                                </th>
+                            )}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {lineasDePartidas(partidas).map((l) => {
+                            const p = l.partida
+                            const estado = estadoDePartida(p)
+                            const cerrada = p.revisadas > 0 && p.restantes === 0
+                            /**
+                             * ⭐ MEJORA 30 (25 Sep 2026 · usuario) — **LA FILA DE PARTIDA**.
+                             *
+                             * Es la dueña de todo lo que **no tiene huella**: lo declarado, las piezas
+                             * declaradas, lo que falta por revisar, el estado de la partida y **sus**
+                             * acciones de revisión. Antes colgaban de la fila de la PRIMERA marca y se
+                             * leían como suyos: *«el botón iniciar está colocado en la fila 1 como si
+                             * dijera que falta revisar de esa marca»*.
+                             *
+                             * Lleva las MISMAS columnas que las filas de producto (la anatomía de la
+                             * fila a todo lo ancho de la SPEC §2.5: `bg-surface-2` + borde), así que
+                             * la tabla se sigue comparando en vertical.
+                             */
+                            if (l.esPartida) {
+                                const textoDevPartida =
+                                    p.dev_cantidad === 1 ? '1 mala' : `${p.dev_cantidad} malas`
+                                const tonoDevPartida = p.dev_ajustada ? 'peligro' : 'advertencia'
+                                /** ⭐ MEJORA 30 — «Liberar n» de la PARTIDA: todos sus productos de una vez. */
+                                const liberablesPartida = p.huellas.reduce(
+                                    (s, h) =>
+                                        s + Math.max(0, h.cantidad_aprobada - h.cantidad_liberada),
+                                    0
+                                )
+                                return (
+                                    <tr key={l.key} className="border-t-2 border-border bg-surface-2">
+                                        <td className="px-2.5 py-2 text-center">
+                                            <span className="font-mono text-[11.5px] tracking-[0.06em] text-acc-entradas">
+                                                PARTIDA {p.partida}
+                                            </span>
+                                        </td>
+                                        <td className="px-2.5 py-2">
+                                            <span
+                                                className="text-muted-foreground"
+                                                title="Lo que Recepción declaró (categoría + atributos de recepción). Debajo, lo que la revisión encontró."
+                                            >
+                                                {huellaDeclarada(p.categoria_nombre, p.atributos)}
+                                            </span>
+                                        </td>
+                                        <td className="px-2.5 py-2 text-center tabular-nums">
+                                            {l.recibidas}
+                                        </td>
+                                        {/* ⭐ MEJORA 32 (usuario) — la fila de PARTIDA pintaba «—» en
+                                            Revisadas y Aprob. mientras sus hijas sí decían su cifra. El
+                                            usuario: *«a pesar que ya fueron revisadas, en las subpartidas
+                                            sí muestra 3/3, pero en el padre no dice el total; solo dice
+                                            las recibidas… en DEV sí muestra cuántas hay»*. El dato YA
+                                            venía en la partida (`PartidaConAvance.revisadas` = aprobadas +
+                                            devueltas, y `.aprobadas`) — el hueco era de pintado, no de
+                                            consulta. La fila padre los dicta con el MISMO formato de sus
+                                            hijas, para que la columna se siga leyendo en vertical. */}
+                                        <td className="px-2.5 py-2 text-center tabular-nums">
+                                            {p.revisadas}
+                                            <span className="text-muted-foreground">/{l.recibidas}</span>
+                                        </td>
+                                        <td className="px-2.5 py-2 text-center tabular-nums text-success">
+                                            {p.aprobadas}
+                                        </td>
+                                        <td className="px-2.5 py-2 text-center">
+                                            {p.dev_cantidad > 0 ? (
+                                                onVerDev ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onVerDev(entrada, p.id)}
+                                                        title={`Ver ${p.dev_cantidad === 1 ? 'la devolución' : `las ${p.dev_cantidad} devoluciones`} de la partida #${p.partida}.`}
+                                                        className={cn(
+                                                        // ⭐ FIX 30-bis — la píldora-botón mantiene su
+                                                        // forma (§2.7) y gana el objetivo de dedo.
+                                                        'inline-flex items-center justify-center rounded-full transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive',
+                                                        tactil && 'min-h-11 min-w-11'
+                                                    )}
+                                                    >
+                                                        <Pildora
+                                                            texto={textoDevPartida}
+                                                            tono={tonoDevPartida}
+                                                        />
+                                                    </button>
+                                                ) : (
+                                                    <Pildora
+                                                        texto={textoDevPartida}
+                                                        tono={tonoDevPartida}
+                                                    />
+                                                )
+                                            ) : (
+                                                <span className="text-muted-foreground">—</span>
+                                            )}
+                                        </td>
+                                        <td className="px-2.5 py-2 text-center tabular-nums">
+                                            {p.restantes > 0 ? (
+                                                <span className="font-semibold text-warning">
+                                                    {p.restantes}
+                                                </span>
+                                            ) : (
+                                                <span className="text-muted-foreground">0</span>
+                                            )}
+                                        </td>
+                                        <td className="px-2.5 py-2 text-center">
+                                            <Pildora texto={estado.texto} tono={estado.tono} />
+                                        </td>
+                                        {hayAcciones && (
+                                            <td className="px-2 py-2 text-center">
+                                                {/* ⭐ FIX 30-bis — los controles de la fila de partida a
+                                                    44 en puesto de dedo (SPEC §1.1/§2.3). */}
+                                                <span
+                                                    className={cn(
+                                                        'flex flex-wrap items-center justify-center gap-1.5',
+                                                        tactil && '[&_button]:min-h-11'
+                                                    )}
+                                                >
+                                                    {cerrada
+                                                        ? onVerResultado && (
+                                                              <Button
+                                                                  type="button"
+                                                                  variant="outline"
+                                                                  size="sm"
+                                                                  onClick={() =>
+                                                                      onVerResultado(entrada)
+                                                                  }
+                                                              >
+                                                                  Ver resultado
+                                                              </Button>
+                                                          )
+                                                        : onIniciar && (
+                                                              <Button
+                                                                  type="button"
+                                                                  variant="outline"
+                                                                  size="sm"
+                                                                  onClick={() => onIniciar(p.id)}
+                                                                  title={`Abrir la revisión de la partida #${p.partida}: ${p.restantes} pieza(s) por revisar.`}
+                                                              >
+                                                                  {/* ⭐ MEJORA 30 — «Revisar (n)»: la MISMA
+                                                                      cifra de la columna Faltan, en el botón
+                                                                      que abre el wizard de esa partida. */}
+                                                                  <Play className="mr-1 h-3.5 w-3.5" />{' '}
+                                                                  Revisar ({p.restantes})
+                                                              </Button>
+                                                          )}
+                                                    {onLiberar &&
+                                                        liberablesPartida > 0 &&
+                                                        puedeLiberar(entrada.estado) && (
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() =>
+                                                                    onLiberar(entrada, p.id)
+                                                                }
+                                                                title={`${liberablesPartida} pieza(s) aprobadas de la partida #${p.partida} (todos sus productos) pueden pasar ya a limpieza.`}
+                                                            >
+                                                                <PackageCheck className="mr-1 h-3.5 w-3.5" />
+                                                                Liberar {liberablesPartida}
+                                                            </Button>
+                                                        )}
+                                                </span>
+                                            </td>
+                                        )}
+                                    </tr>
+                                )
+                            }
+                            /* ── La fila de PRODUCTO: su avance y su DEV ────────────── */
+                            const dev = l.dev
+                            const textoDev = dev === 1 ? '1 mala' : `${dev} malas`
+                            const tonoDev = l.devAjustada ? 'peligro' : 'advertencia'
+                            const liberables = l.huella ? Math.max(0, l.aprobadas - l.liberadas) : 0
+                            return (
+                                <tr key={l.key} className="border-t border-border/70">
+                                    <td
+                                        className={cn(
+                                            'px-2.5 py-2 text-center font-mono tabular-nums',
+                                            l.partidaMultiple
+                                                ? 'text-muted-foreground'
+                                                : 'text-foreground',
+                                            dev > 0 && !p.dev_ajustada
+                                                ? 'shadow-[inset_3px_0_0_var(--warning)]'
+                                                : dev > 0
+                                                  ? 'shadow-[inset_3px_0_0_var(--destructive)]'
+                                                  : undefined
+                                        )}
+                                        title={
+                                            l.partidaMultiple
+                                                ? `Línea ${l.numero} de la entrada · viene de la partida ${p.partida} declarada`
+                                                : `Partida ${p.partida}`
+                                        }
+                                    >
+                                        {l.numero}
+                                    </td>
+                                    {/* ── La línea es UN producto ──────────────────────
+                                        ⭐ MEJORA 28 (opción A) — antes esta celda apilaba TODAS las
+                                        huellas de la partida y la fila seguía siendo una: el usuario
+                                        *«sigo viendo que en detalles solo una partida cuando ahí ya
+                                        debieron nacer 2»*. Ahora cada huella es su propia fila.
+                                        ⭐ MEJORA 29 — y una fila también puede nacer de una **DEV sin
+                                        nada aprobado**: pinta su marca (o «Sin marca» si la DEV es
+                                        anterior a la MEJORA 29, cuando la marca se tiraba al guardar). */}
+                                    <td className="px-2.5 py-2">
+                                        {l.declarada ? (
+                                            <span
+                                                className="italic text-muted-foreground/70"
+                                                title={`Declarado en recepción: ${huellaDeclarada(p.categoria_nombre, p.atributos)}`}
+                                            >
+                                                {huellaDeclarada(p.categoria_nombre, p.atributos)} · sin revisar
+                                            </span>
+                                        ) : (
+                                            <span
+                                                className="font-semibold"
+                                                title={`Declarado en recepción: ${huellaDeclarada(p.categoria_nombre, p.atributos)}`}
+                                            >
+                                                {l.marcaNombre ?? 'Sin marca'}
+                                                {valoresAtributos(l.atributos) && (
+                                                    <span className="font-normal">
+                                                        {' '}
+                                                        · {valoresAtributos(l.atributos)}
+                                                    </span>
+                                                )}
+                                            </span>
+                                        )}
+                                    </td>
+                                    {/* ── Las piezas DE ESTA LÍNEA ─────────────────────
+                                        ⭐ MEJORA 29 (usuario) — antes decía lo declarado de la PARTIDA
+                                        («en la partida uno dice 6 cuando era 3»): la cifra era de la
+                                        partida, no de la línea. */}
+                                    <td className="px-2.5 py-2 text-center tabular-nums">
+                                        {l.recibidas}
+                                    </td>
+                                    {/* ── ③ Avance con barra ─────────────────────────── */}
+                                    {/* ── El avance de ESTA LÍNEA ──────────────────────────────
+                                        ⭐ MEJORA 29 (usuario) — antes la barra era de la PARTIDA y se
+                                        decía una sola vez en la línea que la abría; el desglose no se
+                                        podía leer por producto. Ahora cada línea pinta la suya: una
+                                        partida de 2 marcas se lee como dos avances distintos, y la
+                                        línea con DEV dice su propio «3/3 · 2 aprobadas · 1 mala». */}
+                                    <td className="px-2.5 py-2">
+                                        <span className="flex items-center justify-center gap-2">
+                                            <span className="tabular-nums">
+                                                {l.aprobadas + dev}
+                                                <span className="text-muted-foreground">
+                                                    /{l.recibidas}
+                                                </span>
+                                            </span>
+                                            <BarraAvance
+                                                aprobadas={l.aprobadas}
+                                                dev={dev}
+                                                total={l.recibidas}
+                                                liberadas={l.liberadas}
+                                            />
+                                        </span>
+                                    </td>
+                                    {/* ── Aprobadas de ESTA LÍNEA ─────────────────────────────
+                                        ⭐ MEJORA 30 (usuario) — «n en limpieza» se movió a la columna de
+                                        **Acciones**: esta celda es la cifra que se compara y se dicta,
+                                        y la liberación solo aplica a algunas filas. */}
+                                    <td className="px-2.5 py-2 text-center">
+                                        <span className="tabular-nums text-success">
+                                            {l.declarada ? '—' : l.aprobadas}
+                                        </span>
+                                    </td>
+                                    {/* ── ② «n malas» DE ESTA LÍNEA + píldora-botón → devolución ──
+                                        ⭐ MEJORA 29 (usuario) — antes la DEV era de la PARTIDA y se decía
+                                        una sola vez: *«en la que tiene dev no muestra ese desglose»*.
+                                        Ahora la línea con DEV dice la suya, porque la DEV guarda la
+                                        huella de la pieza devuelta. */}
+                                    <td className="px-2.5 py-2 text-center">
+                                        {dev > 0 ? (
+                                            onVerDev ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onVerDev(entrada, p.id)}
+                                                    title={`Ver ${dev === 1 ? 'la devolución' : `las ${dev} devoluciones`} de ${l.marcaNombre ?? 'este producto'} en la partida #${p.partida}.`}
+                                                    className={cn(
+                                                        // ⭐ FIX 30-bis — la píldora-botón mantiene su
+                                                        // forma (§2.7) y gana el objetivo de dedo.
+                                                        'inline-flex items-center justify-center rounded-full transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive',
+                                                        tactil && 'min-h-11 min-w-11'
+                                                    )}
+                                                >
+                                                    <Pildora texto={textoDev} tono={tonoDev} />
+                                                </button>
+                                            ) : (
+                                                // Solo lectura: el mismo dato, sin puerta.
+                                                <span title={`${dev} ${dev === 1 ? 'pieza devuelta' : 'piezas devueltas'} de ${l.marcaNombre ?? 'este producto'} en la partida #${p.partida}.`}>
+                                                    <Pildora texto={textoDev} tono={tonoDev} />
+                                                </span>
+                                            )
+                                        ) : (
+                                            <span className="text-muted-foreground">—</span>
+                                        )}
+                                    </td>
+                                    {/* ── `Faltan` y `Estado` viven en la FILA DE PARTIDA ────────
+                                        ⭐ MEJORA 30 (usuario) — son de la partida y ya tienen su fila;
+                                        aquí, en una fila de producto, serían un dato ajeno (y las piezas
+                                        que nadie revisó **no tienen huella**: repartirlas sería
+                                        inventarlas). El avance por producto se lee en `Recib.`,
+                                        `Revisadas` y `Aprob.`, que sí son suyos. */}
+                                    <td className="px-2.5 py-2 text-center text-muted-foreground">—</td>
+                                    <td className="px-2.5 py-2 text-center text-muted-foreground">—</td>
+                                    {/* ── Lo que ESTA LÍNEA puede hacer: liberar SU grupo ───────
+                                        ⭐ MEJORA 30 (usuario) — «n en limpieza» aterriza aquí (es el
+                                        estado de liberación de esta fila, no una cifra que se compare) y
+                                        las acciones de REVISIÓN subieron a la fila de partida: son de la
+                                        partida, no de una marca.
+                                        ⚠️ La condición incluye el ESTADO (`puedeLiberar`): antes bastaba
+                                        `liberables > 0` y en las entradas ya avanzadas la puerta salía y
+                                        el servidor la rechazaba con «La entrada ya avanzó…». */}
+                                    {hayAcciones && (
+                                        <td className="px-2 py-2 text-center">
+                                            {/* ⭐ FIX 30-bis — 44 en puesto de dedo (SPEC §1.1/§2.3). */}
+                                            <span
+                                                className={cn(
+                                                    'flex flex-wrap items-center justify-center gap-1.5',
+                                                    tactil && '[&_button]:min-h-11'
+                                                )}
+                                            >
+                                                {onLiberar &&
+                                                    liberables > 0 &&
+                                                    puedeLiberar(entrada.estado) && (
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                onLiberar(
+                                                                    entrada,
+                                                                    p.id,
+                                                                    l.huella?.id_partida_resuelta
+                                                                )
+                                                            }
+                                                            title={`${liberables} pieza(s) aprobadas de ESTE producto pueden pasar ya a limpieza, sin esperar al resto de la partida.`}
+                                                        >
+                                                            <PackageCheck className="mr-1 h-3.5 w-3.5" />
+                                                            Liberar {liberables}
+                                                        </Button>
+                                                    )}
+                                                {l.liberadas > 0 && (
+                                                    <span className="font-mono text-[9.5px] uppercase tracking-[0.09em] text-chart-4">
+                                                        {l.liberadas} en limpieza
+                                                    </span>
+                                                )}
+                                                {liberables === 0 && l.liberadas === 0 && (
+                                                    <span className="text-muted-foreground">—</span>
+                                                )}
+                                            </span>
+                                        </td>
+                                    )}
+                                </tr>
+                            )
+                        })}
+                    </tbody>
+                </table>
+            </div>
+
+            {/* ── Timeline de etapas + totales, en UNA línea ─────────────────── */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                <Hito etiqueta="Recepción" fecha={entrada.fecha} />
+                <Hito etiqueta="Revisión" fecha={entrada.fecha_fin_rev} />
+                <Hito etiqueta="Acondicionamiento" fecha={entrada.fecha_fin_acond} />
+                <Hito etiqueta="Almacén" fecha={entrada.fecha_fin_almacen} />
+                <span className="ml-auto font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {entrada.partidas_count} {entrada.partidas_count === 1 ? 'producto' : 'productos'} ·{' '}
+                    {entrada.piezas_total} pza · {entrada.piezas_aprobadas} aprobadas · DEV{' '}
+                    {entrada.devolucion_total} · faltan {faltanTotal}
+                </span>
+            </div>
+        </div>
+    )
+}

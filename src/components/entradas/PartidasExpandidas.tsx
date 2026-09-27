@@ -1,34 +1,43 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PARTIDAS EXPANDIDAS — contenido de la fila expandible (Guía 1.6 · MEJORA 20 Sep)
+// PARTIDAS EXPANDIDAS — contenido de la fila expandible (Guía 1.6 · Recepción)
 // Primer consumidor de `DataTable.renderFilaExpandida` (PROMOCIÓN 20 Sep): muestra
 // las PARTIDAS de la entrada dentro de su propia fila, sin abrir el expediente.
 //
-// ⭐ MEJORA 22 Sep 2026 (Fase 1 · Recepción) — muestra la EVOLUCIÓN del ingreso:
-//   · Cabecera: partidas · Recibidas · DEV · Final (o «ajuste pendiente») + Total.
-//     Mismo lenguaje que las columnas de la tabla: se entiende sin abrir nada.
-//   · Por partida: Recibida · DEV · Final, con la DEV **real** de
-//     `devoluciones_entrada` (`dev_cantidad`) y si ya se ajustó (`dev_ajustada`).
-//     No se resta a ojo: puede haber DEV viva con la cantidad vigente intacta.
-//   · Timeline de etapas con las fechas que ya trae la fila (recepción · revisión ·
-//     acondicionamiento · almacén).
-// Recibe la FILA (`entrada`), no solo el id: la cabecera y el timeline salen de ahí y
-// las partidas se piden aparte. Cero SQL nuevo.
+// ⭐ MEJORA 22 Sep 2026 (Fase 1 · Recepción) — evolución del ingreso + la DEV **real** de
+// `devoluciones_entrada` (`dev_cantidad`) con su estado (`dev_ajustada`).
+//
+// ⭐ MEJORA 24 Sep 2026 (usuario) — el desglose dejó de apilar tres bloques (chips + timeline +
+// tabla anidada con su propio «Costo»): ahora es **una sola tabla de partidas alineada** —
+// un encabezado, números en columna — más el timeline en una línea con los totales en texto.
+//   · la cantidad NO se dibuja con una barra por pieza (con 200 piezas no escala): números
+//     (`Recibidas` · `DEV` · `Final`) + **barra de proporción**, que se lee igual con 5 o 200;
+//   · el **producto** es la huella declarada (categoría + atributos de recepción): una pieza
+//     devuelta no tiene SKU, lo resuelve Almacén y solo para lo aprobado;
+//   · 2ª pasada del mismo día (usuario): encabezados **sintetizados** («#», «Producto»,
+//     «Recib.»), **sin negritas** en las celdas y las acciones **contraídas en un menú ⋯**
+//     — antes eran botones/iconos inline y se veían amontonados.
+// ⚠️ El menú abre el MISMO modal de la DEV (`AjusteDevModal`): un Dialog que se abre en el
+// mismo tick en que cierra un menú deja su overlay fantasma (Radix), así que la apertura va
+// **diferida 160 ms** — el patrón que el proyecto ya documentó en `NotasCompraCatalogo`.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useEffect, useState } from 'react'
-import { Check, Clock, FileText, Package, PackageCheck, PackageMinus } from 'lucide-react'
 
 import { Pildora } from '@/components/data-table'
-import { listarPartidasEntrada } from '@/lib/actions/entradas'
+import { Spinner } from '@/components/ui/spinner'
+import { listarPartidasConAvance } from '@/lib/actions/entradas'
 import {
     devPendiente,
     formatearFechaEntrada,
     formatearMXNEntrada,
+    lineasDePartidas,
+    productoDeLinea,
 } from '@/components/entradas/columnas-entrada'
 import { cn } from '@/lib/utils'
-import type { Entrada, PartidaEntrada } from '@/types/entradas'
+import type { Entrada, EstadoPartida, PartidaConAvance } from '@/types/entradas'
+import { TEXTO_ESTADO_PARTIDA } from '@/types/entradas'
 
 /** Un hito del timeline: la fecha ya formateada, o `—` si esa etapa no ocurrió. */
 function Hito({ etiqueta, fecha }: { etiqueta: string; fecha: string | null }) {
@@ -41,7 +50,7 @@ function Hito({ etiqueta, fecha }: { etiqueta: string; fecha: string | null }) {
             />
             <span
                 className={cn(
-                    'font-mono text-[9.5px] uppercase tracking-[0.12em]',
+                    'font-mono text-[10px] uppercase tracking-[0.12em]',
                     hecha ? 'text-foreground/80' : 'text-muted-foreground/70'
                 )}
             >
@@ -49,7 +58,7 @@ function Hito({ etiqueta, fecha }: { etiqueta: string; fecha: string | null }) {
             </span>
             <span
                 className={cn(
-                    'text-[11.5px] tabular-nums',
+                    'text-[13px] tabular-nums',
                     hecha ? 'text-foreground' : 'text-muted-foreground/50'
                 )}
             >
@@ -59,64 +68,56 @@ function Hito({ etiqueta, fecha }: { etiqueta: string; fecha: string | null }) {
     )
 }
 
-/** Dato de la cabecera de evolución (icono + etiqueta + valor). */
-function Dato({
-    icono: Icono,
-    etiqueta,
-    valor,
-    tono = 'neutro',
-}: {
-    icono: typeof Package
-    etiqueta: string
-    valor: string
-    tono?: 'neutro' | 'peligro' | 'exito'
-}) {
+/**
+ * ⭐ Barra de PROPORCIÓN (no una barra por pieza): final vs DEV sobre lo declarado. El tramo
+ * rojo lleva `minWidth` para que `−1 de 200` siga siendo visible sin exagerar la proporción.
+ */
+function Proporcion({ final, dev, total }: { final: number; dev: number; total: number }) {
+    const base = Math.max(total, final + dev, 1)
     return (
-        <span className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5">
-            <Icono
-                className={cn(
-                    'size-3.5 shrink-0',
-                    tono === 'peligro'
-                        ? 'text-destructive'
-                        : tono === 'exito'
-                          ? 'text-success'
-                          : 'text-muted-foreground'
-                )}
-                aria-hidden="true"
-            />
-            <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground">
-                {etiqueta}
-            </span>
-            <span
-                className={cn(
-                    'text-[12.5px] font-semibold tabular-nums',
-                    tono === 'peligro'
-                        ? 'text-destructive'
-                        : tono === 'exito'
-                          ? 'text-success'
-                          : 'text-foreground'
-                )}
-            >
-                {valor}
-            </span>
+        <span
+            aria-hidden="true"
+            className="inline-flex h-1.5 w-[64px] shrink-0 overflow-hidden rounded-full bg-border"
+        >
+            <span className="block h-full bg-success" style={{ width: `${(final / base) * 100}%` }} />
+            {dev > 0 && (
+                <span
+                    className="block h-full bg-destructive"
+                    style={{ width: `${(dev / base) * 100}%`, minWidth: 5 }}
+                />
+            )}
         </span>
     )
 }
+
+/** Estado de la partida cuando NO hay DEV (si la hay, manda el estado de la DEV). */
+const TONO_PARTIDA: Record<EstadoPartida, 'neutro' | 'listo' | 'peligro'> = {
+    PENDIENTE: 'neutro',
+    OK: 'listo',
+    MAL: 'peligro',
+}
+
+/** Los encabezados, cortos: el dato no se toca, la etiqueta se sintetiza. */
+const TH = 'px-2.5 py-1.5 font-medium'
 
 export function PartidasExpandidas({
     entrada,
     onAjustar,
 }: {
     entrada: Entrada
-    /** Abre «Ajustar y nota» para esta entrada (lo provee la página). */
+    /** Abre el modal de la DEV (ver + ajustar + generar nota) para esta entrada. */
     onAjustar?: (e: Entrada) => void
 }) {
-    const [partidas, setPartidas] = useState<PartidaEntrada[]>([])
+    // ⭐ MEJORA 28 (decisión 22.h) — la MISMA fuente que el desglose de Revisión
+    // (`listarPartidasConAvance`): con las huellas se puede mostrar una línea por producto. Antes
+    // usaba `listarPartidasEntrada`, que solo devuelve lo DECLARADO — por eso Recepción seguía
+    // viendo «una partida» cuando la revisión ya había abierto dos marcas.
+    const [partidas, setPartidas] = useState<PartidaConAvance[]>([])
     const [cargando, setCargando] = useState(true)
 
     useEffect(() => {
         let activo = true
-        void listarPartidasEntrada(entrada.id).then((r) => {
+        void listarPartidasConAvance(entrada.id).then((r) => {
             if (!activo) return
             if (r.success) setPartidas(r.data ?? [])
             setCargando(false)
@@ -126,116 +127,265 @@ export function PartidasExpandidas({
         }
     }, [entrada.id])
 
-    const pendiente = devPendiente(entrada)
-    const conDev = entrada.devolucion_total > 0
+    /** ¿La entrada está en el paso donde el ajuste + la nota ya se pueden generar? */
+    const puedeAjustar = devPendiente(entrada) && Boolean(onAjustar)
+
+    /** ⭐ MEJORA 24 Sep 2026 (Fase 1) — el ⋯ se fue del puesto de dedo: la acción es un
+     *  **botón con etiqueta** (ley L11). Al no haber menú, tampoco hay que diferir la apertura
+     *  del modal (el retardo de 160 ms existía para el overlay fantasma de Radix). */
 
     return (
-        <div className="space-y-3">
-            {/* ── Evolución del ingreso ───────────────────────────────────── */}
-            <div className="flex flex-wrap items-center gap-2">
-                <Dato icono={Package} etiqueta="Partidas" valor={String(entrada.partidas_count)} />
-                <Dato
-                    icono={PackageCheck}
-                    etiqueta="PZ. RECIBIDAS"
-                    valor={String(entrada.piezas_total)}
-                />
-                <Dato
-                    icono={PackageMinus}
-                    etiqueta="DEV"
-                    valor={conDev ? `−${entrada.devolucion_total}` : '—'}
-                    tono={conDev ? 'peligro' : 'neutro'}
-                />
-                <Dato
-                    icono={Check}
-                    etiqueta="Final"
-                    valor={String(entrada.piezas_vigentes)}
-                    tono={conDev && !pendiente ? 'exito' : 'neutro'}
-                />
-                {/* La acción, no el aviso (usuario): el botón abre «Ajustar y nota». */}
-                {pendiente && onAjustar && (
-                    <button
-                        type="button"
-                        onClick={() => onAjustar(entrada)}
-                        title="La DEV no está ajustada: abre el ajuste y genera la nota de compra."
-                        className="inline-flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-[10.5px] font-medium uppercase tracking-wide text-warning transition-colors hover:bg-warning/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning"
-                    >
-                        <FileText className="size-3 shrink-0" aria-hidden="true" />
-                        Ajustar y generar nota
-                    </button>
-                )}
-            </div>
-
-            {/* ── Timeline de etapas ──────────────────────────────────────── */}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border border-border/70 bg-surface px-3 py-2">
-                <Hito etiqueta="Recepción" fecha={entrada.fecha} />
-                <Hito etiqueta="Revisión" fecha={entrada.fecha_fin_rev} />
-                <Hito etiqueta="Acondicionamiento" fecha={entrada.fecha_fin_acond} />
-                <Hito etiqueta="Almacén" fecha={entrada.fecha_fin_almacen} />
-            </div>
-
-            {/* ── Partidas: recibida · DEV · final ────────────────────────── */}
+        <div className="flex flex-col gap-3">
+            {/* ── Partidas: una tabla alineada, un solo encabezado ───────────── */}
             {cargando ? (
-                <p className="text-sm text-muted-foreground">Cargando partidas…</p>
+                <Spinner etiqueta="Cargando partidas…" className="py-1" />
             ) : partidas.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Sin partidas.</p>
             ) : (
-                <div className="rounded-md border border-border/70">
-                    <table className="w-full text-xs">
-                        <thead className="border-b border-border/70 text-center text-muted-foreground">
+                <div className="overflow-hidden rounded-md border border-border bg-surface-raised">
+                    <table className="w-full text-[14.5px]">
+                        <thead className="border-b border-border bg-surface text-[10px] uppercase tracking-[0.09em] text-muted-foreground">
                             <tr>
-                                <th className="px-3 py-2 font-medium">#</th>
-                                <th className="px-3 py-2 font-medium">Clasificación</th>
-                                <th className="px-3 py-2 font-medium">Recibida</th>
-                                <th className="px-3 py-2 font-medium">DEV</th>
-                                <th className="px-3 py-2 font-medium">Final</th>
-                                <th className="px-3 py-2 font-medium">Costo</th>
-                                <th className="px-3 py-2 font-medium">Estado</th>
+                                <th className={cn(TH, 'w-12')} title="Número de partida">
+                                    #
+                                </th>
+                                <th
+                                    className={cn(TH, 'text-left')}
+                                    title="Categoría y atributos capturados en recepción (la huella declarada)"
+                                >
+                                    Producto
+                                </th>
+                                <th
+                                    className={cn(TH, 'w-20')}
+                                    title="En la fila de PARTIDA, lo declarado en recepción; en las de producto, las piezas de ese producto."
+                                >
+                                    Recib.
+                                </th>
+                                <th
+                                    className={cn(TH, 'w-14')}
+                                    title="De la partida en su fila; de cada producto en la suya (la pieza devuelta dice su marca)."
+                                >
+                                    DEV
+                                </th>
+                                <th
+                                    className={cn(TH, 'w-28')}
+                                    title="Lo que queda tras el ajuste en la fila de partida; lo aprobado de cada producto en la suya."
+                                >
+                                    Final
+                                </th>
+                                <th className={cn(TH, 'w-28')} title="Estado de la PARTIDA">
+                                    Estado
+                                </th>
+                                <th className={cn(TH, 'w-24')} title="Costo acordado de la PARTIDA">
+                                    Costo
+                                </th>
+                                <th className={cn(TH, 'w-24')}>
+                                    <span className="sr-only">Acciones</span>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
-                            {partidas.map((p) => (
-                                <tr key={p.id} className="border-t border-border/70">
-                                    <td className="px-3 py-2 text-center font-mono tabular-nums">{p.partida}</td>
-                                    <td className="px-3 py-2 text-center">{p.categoria_nombre ?? '—'}</td>
-                                    <td className="px-3 py-2 text-center tabular-nums">{p.cantidad_original}</td>
-                                    <td className="px-3 py-2 text-center">
-                                        {p.dev_cantidad > 0 ? (
-                                            <span className="inline-flex items-center gap-1.5">
-                                                <Pildora texto={`−${p.dev_cantidad}`} tono="peligro" />
-                                                {p.dev_ajustada ? (
-                                                    <Check
-                                                        className="size-3 text-success"
-                                                        aria-label="DEV ya ajustada"
+                            {lineasDePartidas(partidas).map((l) => {
+                                const p = l.partida
+                                /* ── ⭐ MEJORA 30 (25 Sep 2026 · usuario) — LA FILA DE PARTIDA ──
+                                   El mismo criterio que en Revisión, con las columnas de Recepción:
+                                   lo que es de la PARTIDA (lo declarado · el DEV del documento · el
+                                   `Final` vigente · el estado del ajuste · el costo · la acción de
+                                   ajustar) tiene su PROPIA fila; las de producto dicen lo suyo. Antes
+                                   todo eso vivía en la fila del primer producto y se leía como suyo. */
+                                if (l.esPartida) {
+                                    const devPartida = Number(p.dev_cantidad ?? 0)
+                                    const devPendPartida = devPartida > 0 && !p.dev_ajustada
+                                    return (
+                                        <tr
+                                            key={l.key}
+                                            className="border-t-2 border-border bg-surface-2"
+                                        >
+                                            <td className="px-2.5 py-2 text-center">
+                                                <span className="font-mono text-[11.5px] tracking-[0.06em] text-acc-entradas">
+                                                    PARTIDA {p.partida}
+                                                </span>
+                                            </td>
+                                            <td
+                                                className="px-2.5 py-2 text-muted-foreground"
+                                                title="Lo que Recepción declaró. Debajo, lo que la revisión encontró."
+                                            >
+                                                {productoDeLinea(l)}
+                                            </td>
+                                            <td
+                                                className="px-2.5 py-2 text-center tabular-nums"
+                                                title="Piezas declaradas en recepción"
+                                            >
+                                                {p.cantidad_original}
+                                            </td>
+                                            <td
+                                                className={cn(
+                                                    'px-2.5 py-2 text-center tabular-nums',
+                                                    devPartida > 0
+                                                        ? 'text-destructive'
+                                                        : 'text-muted-foreground'
+                                                )}
+                                                title="DEV de la PARTIDA (Σ de sus productos)"
+                                            >
+                                                {devPartida > 0 ? `−${devPartida}` : '—'}
+                                            </td>
+                                            <td className="px-2.5 py-2">
+                                                <span className="flex items-center justify-center gap-2">
+                                                    <span className="text-[17px] tabular-nums">
+                                                        {Number(p.cantidad_vigente)}
+                                                    </span>
+                                                    <Proporcion
+                                                        final={Number(p.cantidad_vigente)}
+                                                        dev={devPartida}
+                                                        total={Number(p.cantidad_original)}
+                                                    />
+                                                </span>
+                                            </td>
+                                            <td className="px-2.5 py-2 text-center">
+                                                {devPartida > 0 ? (
+                                                    <Pildora
+                                                        texto={
+                                                            p.dev_ajustada
+                                                                ? 'Ajustada'
+                                                                : 'Por cotejar'
+                                                        }
+                                                        tono={
+                                                            p.dev_ajustada ? 'listo' : 'advertencia'
+                                                        }
                                                     />
                                                 ) : (
-                                                    <Clock
-                                                        className="size-3 text-warning"
-                                                        aria-label="DEV pendiente de ajuste"
+                                                    <Pildora
+                                                        texto={
+                                                            TEXTO_ESTADO_PARTIDA[p.estado_partida]
+                                                        }
+                                                        tono={TONO_PARTIDA[p.estado_partida]}
                                                     />
                                                 )}
+                                            </td>
+                                            <td className="px-2.5 py-2 text-center tabular-nums text-muted-foreground">
+                                                {formatearMXNEntrada(Number(p.costo_acordado))}
+                                            </td>
+                                            <td className="px-2 py-2 text-center">
+                                                {devPartida > 0 && onAjustar ? (
+                                                    puedeAjustar && devPendPartida ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onAjustar(entrada)}
+                                                            title="Ajusta la devolución y genera la nota de compra de la entrada."
+                                                            className="inline-flex h-8 items-center rounded-md border border-transparent bg-primary px-2.5 text-[12px] font-semibold text-primary-foreground transition-colors hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                                        >
+                                                            Ajustar y generar nota
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onAjustar(entrada)}
+                                                            title="Ver la devolución: partida, producto, motivo y estado."
+                                                            data-accion="ver-devolucion"
+                                                            className="inline-flex h-8 items-center whitespace-nowrap rounded-md border border-border bg-surface px-3 text-[12px] font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                                        >
+                                                            Ver devolución
+                                                        </button>
+                                                    )
+                                                ) : (
+                                                    <span className="text-muted-foreground">—</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    )
+                                }
+                                /* ── La fila de PRODUCTO: su DEV y su `Final` ────────────── */
+                                // ⭐ MEJORA 29 — la DEV es de ESTA línea: guarda la huella de la pieza
+                                // devuelta (antes era de la partida y se repetía —o se anulaba— en
+                                // todas sus líneas para no contar dos veces el mismo rojo).
+                                const dev = l.dev
+                                const devPend = dev > 0 && !l.devAjustada
+                                return (
+                                    <tr key={l.key} className="border-t border-border/70">
+                                        <td
+                                            className={cn(
+                                                'px-2.5 py-2 text-center font-mono tabular-nums',
+                                                l.partidaMultiple
+                                                    ? 'text-muted-foreground'
+                                                    : 'text-foreground',
+                                                devPend
+                                                    ? 'shadow-[inset_3px_0_0_var(--warning)]'
+                                                    : dev > 0
+                                                      ? 'shadow-[inset_3px_0_0_var(--destructive)]'
+                                                      : undefined
+                                            )}
+                                            title={
+                                                l.partidaMultiple
+                                                    ? `Producto ${l.numero} de la entrada · viene de la partida ${p.partida} declarada`
+                                                    : `Partida ${p.partida}`
+                                            }
+                                        >
+                                            {l.numero}
+                                        </td>
+                                        <td className="px-2.5 py-2 pl-8">{productoDeLinea(l)}</td>
+                                        <td
+                                            className="px-2.5 py-2 text-center tabular-nums text-muted-foreground"
+                                            title="Piezas DE ESTE producto: aprobadas + devueltas"
+                                        >
+                                            {l.recibidas}
+                                        </td>
+                                        <td
+                                            className={cn(
+                                                'px-2.5 py-2 text-center tabular-nums',
+                                                dev > 0
+                                                    ? 'text-destructive'
+                                                    : 'text-muted-foreground'
+                                            )}
+                                            title="DEV de ESTE producto (la pieza devuelta dice su marca)"
+                                        >
+                                            {dev > 0 ? `−${dev}` : '—'}
+                                        </td>
+                                        <td className="px-2.5 py-2">
+                                            <span className="flex items-center justify-center gap-2">
+                                                {/* ⭐ MEJORA 24 Sep 2026 (Fase 1) — la cifra que el
+                                                    piso necesita leer de un vistazo: 17px. */}
+                                                <span className="text-[17px] tabular-nums">
+                                                    {l.aprobadas}
+                                                </span>
+                                                {/* ⭐ MEJORA 29 — la barra de cada fila es su rebanada
+                                                    de lo DECLARADO: las rebanadas de una partida suman
+                                                    su total, y la DEV cae en la que le toca. */}
+                                                <Proporcion
+                                                    final={l.aprobadas}
+                                                    dev={dev}
+                                                    total={Number(p.cantidad_original)}
+                                                />
                                             </span>
-                                        ) : (
-                                            <span className="text-muted-foreground">—</span>
-                                        )}
-                                    </td>
-                                    <td
-                                        className={cn(
-                                            'px-3 py-2 text-center tabular-nums',
-                                            p.dev_cantidad > 0 && 'font-semibold'
-                                        )}
-                                    >
-                                        {p.cantidad_vigente}
-                                    </td>
-                                    <td className="px-3 py-2 text-center tabular-nums">
-                                        {formatearMXNEntrada(p.costo_acordado)}
-                                    </td>
-                                    <td className="px-3 py-2 text-center">{p.estado_partida}</td>
-                                </tr>
-                            ))}
+                                        </td>
+                                        <td className="px-2.5 py-2 text-center text-muted-foreground">
+                                            —
+                                        </td>
+                                        <td className="px-2.5 py-2 text-center text-muted-foreground">
+                                            —
+                                        </td>
+                                        <td className="px-2 py-2 text-center text-muted-foreground">
+                                            —
+                                        </td>
+                                    </tr>
+                                )
+                            })}
                         </tbody>
                     </table>
                 </div>
             )}
+
+            {/* ── Timeline de etapas + totales, en UNA línea ─────────────────── */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                <Hito etiqueta="Recepción" fecha={entrada.fecha} />
+                <Hito etiqueta="Revisión" fecha={entrada.fecha_fin_rev} />
+                <Hito etiqueta="Acondicionamiento" fecha={entrada.fecha_fin_acond} />
+                <Hito etiqueta="Almacén" fecha={entrada.fecha_fin_almacen} />
+                <span className="ml-auto font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
+                    {entrada.partidas_count} {entrada.partidas_count === 1 ? 'producto' : 'productos'} ·{' '}
+                    {entrada.piezas_total} pza · DEV {entrada.devolucion_total} · final{' '}
+                    {entrada.piezas_vigentes}
+                </span>
+            </div>
         </div>
     )
 }

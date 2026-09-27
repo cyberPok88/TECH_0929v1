@@ -124,7 +124,7 @@ export function ColumnSelector<TData>({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2">
+                <Button variant="outline" size="sm" className="h-11 gap-2 md:h-8">
                     <Columns3 className="h-4 w-4" aria-hidden="true" />
                     <span className="hidden sm:inline">Columnas</span>
                 </Button>

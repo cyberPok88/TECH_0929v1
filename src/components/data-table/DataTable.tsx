@@ -32,10 +32,11 @@ import { Fragment, useMemo, useState, useSyncExternalStore } from "react"
 import { TableSkeleton } from "./TableSkeleton"
 import { Pagination } from "./Pagination"
 import { ColumnSelector } from "./ColumnSelector"
+import { FiltroColumnaBoton } from "./filtros/FiltroColumna"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
-import { AlertCircle, Loader2, ChevronUp, ChevronDown, ChevronRight, Minus } from "lucide-react"
+import { AlertCircle, FilterX, Loader2, ChevronUp, ChevronDown, ChevronRight, Minus } from "lucide-react"
 import type {
     DataTableProps,
     ColumnDefExtension,
@@ -62,6 +63,9 @@ export function DataTable<TData>({
     rowKey,
     estado = "idle",
     emptyMessage = "Sin resultados",
+    // ⭐ MEJORA 26 Sep 2026 — estado vacío honesto: «no hay datos» ≠ «tú los escondiste».
+    filtrosActivos = false,
+    onLimpiarFiltros,
     onRetry,
     pageSize = 20,
     pageSizeOptions,
@@ -89,6 +93,8 @@ export function DataTable<TData>({
     // ⭐ REDISEÑO 02 Sep 2026
     densidad,
     alturaMaxima,
+    // ⭐ PROMOCIÓN 24 Sep 2026 (Guía 1.6 Fase 2 → kit 0.8) — modo táctil por PUESTO
+    modoTactil = false,
     // ⭐ PROMOCIÓN 20 Sep 2026 — fila expandible (Guía 1.6 Entradas → kit 0.8)
     renderFilaExpandida,
     // ⭐ MEJORA 20 Sep 2026 — alineación de los DATOS (default: centrado)
@@ -97,8 +103,13 @@ export function DataTable<TData>({
     // ⭐ R2: el DEFAULT responde al breakpoint (Ley 5 — 44px táctil / 34px denso en
     // escritorio); la prop `densidad` es el OVERRIDE explícito del usuario.
     // (R4 se resuelve con clases CSS por `movil` — no necesita estado JS.)
+    //
+    // ⭐ PROMOCIÓN 24 Sep 2026 — `modoTactil` (puesto de dedo) GANA sobre el breakpoint: una tablet
+    // de piso mide ≥768px y con la regla de ancho recibía «compacto» = 32px. El puesto manda.
     const esEscritorio = useMediaQuery("(min-width: 768px)")
-    const densidadEfectiva = densidad ?? (esEscritorio ? "compacto" : "normal")
+    const densidadEfectiva = modoTactil ? "normal" : (densidad ?? (esEscritorio ? "compacto" : "normal"))
+    /** El objetivo pulsable de la fila: responsive sin `modoTactil`, siempre de dedo con él. */
+    const claseObjetivo = modoTactil ? "h-11 w-11" : "h-11 w-11 md:h-8 md:w-8"
     // ══════════════════════════════════════════════════════════════════════════════
     // MODO: ¿Local automático o servidor controlado?
     // ══════════════════════════════════════════════════════════════════════════════
@@ -365,8 +376,19 @@ export function DataTable<TData>({
     // ESTADOS VISUALES
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    // Loading → TableSkeleton
-    if (estado === "loading") {
+    // ⭐ MEJORA 26 Sep 2026 — RECARGAR NO ES CARGAR. `loading` significa dos cosas distintas
+    // y antes se pintaban igual:
+    //   · SIN filas todavía (primera carga): TableSkeleton — no hay nada que preservar.
+    //   · CON filas ya en pantalla (cambió un filtro, una página, un tamaño): la tabla se
+    //     ATENÚA y dice «Actualizando…». Borrarla y poner el esqueleto parpadea y el usuario
+    //     pierde la referencia de lo que estaba leyendo; y en los filtros era directamente
+    //     MUDO — los listados no ponían `loading` al filtrar, así que la tabla seguía
+    //     mostrando filas viejas sin señal hasta que llegaban las nuevas. En un celular eso
+    //     se lee como «no pasó nada» y se toca dos veces.
+    const enRecarga = estado === "loading" && data.length > 0
+
+    // Loading inicial → TableSkeleton
+    if (estado === "loading" && !enRecarga) {
         return (
             <TableSkeleton
                 rows={pageSize}
@@ -399,12 +421,30 @@ export function DataTable<TData>({
     }
 
     // Empty → mensaje + icono
+    // ⭐ MEJORA 26 Sep 2026 — DOS vacíos distintos. El genérico («Sin resultados») hacía
+    // que un listado filtrado se viera igual que un listado vacío de verdad: el usuario
+    // no sabía si no hay datos o si él los escondió, que es la duda nº1 de un ERP.
+    // Con `filtrosActivos` la tabla lo dice y ofrece la salida.
     const rowCount = table.getRowModel().rows.length
     if (rowCount === 0 && estado === "idle") {
         return (
             <div className={cn("flex flex-col items-center justify-center p-8 gap-3", className)}>
-                <AlertCircle className="h-10 w-10 text-muted-foreground/50" aria-hidden="true" />
-                <p className="text-center text-muted-foreground">{emptyMessage}</p>
+                {filtrosActivos ? (
+                    <FilterX className="h-10 w-10 text-muted-foreground/50" aria-hidden="true" />
+                ) : (
+                    <AlertCircle className="h-10 w-10 text-muted-foreground/50" aria-hidden="true" />
+                )}
+                <p className="text-center text-muted-foreground">
+                    {filtrosActivos
+                        ? "Ninguna fila coincide con los filtros aplicados."
+                        : emptyMessage}
+                </p>
+                {filtrosActivos && onLimpiarFiltros && (
+                    <Button variant="outline" size="sm" className="h-11 md:h-8" onClick={onLimpiarFiltros}>
+                        <FilterX className="mr-2 h-4 w-4" aria-hidden="true" />
+                        Limpiar filtros
+                    </Button>
+                )}
             </div>
         )
     }
@@ -508,11 +548,23 @@ export function DataTable<TData>({
                 className
             )}
             style={alturaMaxima ? { maxHeight: alturaMaxima } : undefined}
+            aria-busy={enRecarga || undefined}
         >
-            {/* Barra superior: toolbar de acciones masivas (si hay selección) + ColumnSelector */}
+            {/* Barra superior: toolbar de acciones masivas (si hay selección) + aviso de
+                recarga + ColumnSelector. */}
             {(showColumnSelector && columns.length > 0) ||
-            (enableRowSelection && renderToolbar && selectedRows.length > 0) ? (
+            (enableRowSelection && renderToolbar && selectedRows.length > 0) ||
+            enRecarga ? (
                 <div className="flex items-center justify-between gap-3 p-3 border-b border-border bg-surface-2">
+                    {enRecarga && (
+                        <span
+                            role="status"
+                            className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                        >
+                            <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                            Actualizando…
+                        </span>
+                    )}
                     {enableRowSelection && renderToolbar && selectedRows.length > 0 && (
                         <div className="flex flex-wrap items-center gap-2">
                             {renderToolbar({
@@ -534,6 +586,15 @@ export function DataTable<TData>({
                 </div>
             ) : null}
 
+            {/* ⭐ MEJORA 26 Sep 2026 — la atenuación envuelve SOLO el cuerpo (tabla +
+                paginación): el aviso «Actualizando…» y el ColumnSelector viven fuera, así
+                que el indicador se lee nítido mientras el resto se apaga. `pointer-events-none`
+                impide disparar dos veces la misma acción mientras el servidor responde. */}
+            <div
+                className={cn(
+                    enRecarga && "pointer-events-none opacity-60 transition-opacity duration-200"
+                )}
+            >
             {/* ⭐ border-separate (R1/R6): sin collapse — el sticky de columnas y del
                 header necesita bordes por celda, no colapsados. */}
             <table className="w-full border-separate border-spacing-0 caption-bottom text-sm" role="table">
@@ -560,7 +621,7 @@ export function DataTable<TData>({
                                     style={{ minWidth: 44 }}
                                 >
                                     {/* R3: área táctil ≥44px en <768px (Ley 5) */}
-                                    <span className="flex h-11 w-11 md:h-8 md:w-8 items-center justify-center">
+                                    <span className={cn("flex items-center justify-center", claseObjetivo)}>
                                         <Checkbox
                                             checked={
                                                 table.getIsSomeRowsSelected()
@@ -573,63 +634,104 @@ export function DataTable<TData>({
                                     </span>
                                 </th>
                             )}
-                            {headerGroup.headers.map((header) => (
-                                <th
-                                    key={header.id}
-                                    className={claseHeader(header)}
-                                    style={
-                                        // ⭐ FIX 22 Sep 2026 — el ancho en línea SOLO si la columna
-                                        // lo declara. Antes se aplicaba SIEMPRE `header.getSize()`
-                                        // (default de TanStack = 150px) como `width` Y `minWidth`:
-                                        // 10 columnas = 1 500px mínimos, así que la tabla no usaba
-                                        // el ancho (scroll horizontal permanente) y las clases de
-                                        // `movil` (`max-w-[110px]`) eran letra muerta — el estilo en
-                                        // línea gana. Sin `size` declarado, manda el contenido.
-                                        header.column.columnDef.size !== undefined
-                                            ? { width: header.getSize(), minWidth: header.getSize() }
-                                            : undefined
-                                    }
-                                    onClick={
-                                        header.column.getCanSort()
-                                            ? () => handleSortToggle(header.column)
-                                            : undefined
-                                    }
-                                >
-                                    {header.isPlaceholder ? null : (
-                                        <div
-                                            className={cn(
-                                                "flex items-center gap-1",
-                                                justifyDelHeader(header.column.columnDef)
-                                            )}
-                                        >
-                                            {flexRender(
-                                                header.column.columnDef.header,
-                                                header.getContext()
-                                            )}
-                                            {header.column.getCanSort() && (
-                                                <span
-                                                    className={cn(
-                                                        "flex items-center justify-center",
-                                                        "transition-opacity duration-150",
-                                                        // Opacidad en vez de mostrar/ocultar (Decisión 7)
-                                                        isSorted
-                                                            ? "opacity-100"
-                                                            : "opacity-40"
-                                                    )}
-                                                >
-                                                    {header.column.getIsSorted() === "asc" ? (
-                                                        <ChevronUp className="h-3.5 w-3.5" />
-                                                    ) : header.column.getIsSorted() === "desc" ? (
-                                                        <ChevronDown className="h-3.5 w-3.5" />
-                                                    ) : (
-                                                        <Minus className="h-3.5 w-3.5" />
-                                                    )}
-                                                </span>
-                                            )}
-                                        </div>
-                                    )}
-                                </th>
-                            ))}
+                            {headerGroup.headers.map((header) => {
+                                const ordenable = header.column.getCanSort()
+                                const direccion = header.column.getIsSorted()
+                                const filtroColumna = extDe(header.column.columnDef).filtro
+                                return (
+                                    <th
+                                        key={header.id}
+                                        className={claseHeader(header)}
+                                        style={
+                                            // ⭐ FIX 22 Sep 2026 — el ancho en línea SOLO si la columna
+                                            // lo declara. Antes se aplicaba SIEMPRE `header.getSize()`
+                                            // (default de TanStack = 150px) como `width` Y `minWidth`:
+                                            // 10 columnas = 1 500px mínimos, así que la tabla no usaba
+                                            // el ancho (scroll horizontal permanente) y las clases de
+                                            // `movil` (`max-w-[110px]`) eran letra muerta — el estilo en
+                                            // línea gana. Sin `size` declarado, manda el contenido.
+                                            header.column.columnDef.size !== undefined
+                                                ? { width: header.getSize(), minWidth: header.getSize() }
+                                                : undefined
+                                        }
+                                        // ⭐ MEJORA 26 Sep 2026 — `aria-sort`: el `<th>` ordena desde
+                                        // siempre con un onClick, pero un lector de pantalla no podía
+                                        // saber ni que era ordenable ni en qué sentido estaba. Con
+                                        // `tabIndex` + Enter/Espacio, ordenar deja de exigir ratón.
+                                        aria-sort={
+                                            ordenable
+                                                ? direccion === "asc"
+                                                    ? "ascending"
+                                                    : direccion === "desc"
+                                                      ? "descending"
+                                                      : "none"
+                                                : undefined
+                                        }
+                                        tabIndex={ordenable ? 0 : undefined}
+                                        onClick={
+                                            ordenable ? () => handleSortToggle(header.column) : undefined
+                                        }
+                                        onKeyDown={
+                                            ordenable
+                                                ? (e) => {
+                                                      if (e.key === "Enter" || e.key === " ") {
+                                                          e.preventDefault()
+                                                          handleSortToggle(header.column)
+                                                      }
+                                                  }
+                                                : undefined
+                                        }
+                                    >
+                                        {header.isPlaceholder ? null : (
+                                            <div
+                                                className={cn(
+                                                    "flex items-center gap-1",
+                                                    justifyDelHeader(header.column.columnDef)
+                                                )}
+                                            >
+                                                {flexRender(
+                                                    header.column.columnDef.header,
+                                                    header.getContext()
+                                                )}
+                                                {ordenable && (
+                                                    <span
+                                                        className={cn(
+                                                            "flex items-center justify-center",
+                                                            "transition-opacity duration-150",
+                                                            // Opacidad en vez de mostrar/ocultar (Decisión 7)
+                                                            isSorted
+                                                                ? "opacity-100"
+                                                                : "opacity-40"
+                                                        )}
+                                                    >
+                                                        {direccion === "asc" ? (
+                                                            <ChevronUp className="h-3.5 w-3.5" />
+                                                        ) : direccion === "desc" ? (
+                                                            <ChevronDown className="h-3.5 w-3.5" />
+                                                        ) : (
+                                                            <Minus className="h-3.5 w-3.5" />
+                                                        )}
+                                                    </span>
+                                                )}
+                                                {/* ⭐ MEJORA 26 Sep 2026 — el filtro vive en su
+                                                    columna: el embudo abre el panel del kit y,
+                                                    con filtro aplicado, se pinta en tinta de
+                                                    acento. El `stopPropagation` del botón evita
+                                                    que abrirlo ordene la columna. */}
+                                                {filtroColumna && (
+                                                    <FiltroColumnaBoton
+                                                        label={
+                                                            extDe(header.column.columnDef).label ??
+                                                            String(header.column.id)
+                                                        }
+                                                        filtro={filtroColumna}
+                                                    />
+                                                )}
+                                            </div>
+                                        )}
+                                    </th>
+                                )
+                            })}
                             {/* ⭐ COMPAT (REDISEÑO 02 Sep): renderRowActions deprecado —
                                 ahora sí con <th> "Acciones" + sticky (antes no tenía header). */}
                             {renderRowActions && (
@@ -657,7 +759,10 @@ export function DataTable<TData>({
                                                 onClick={() => alternarExpandida(claveFila)}
                                                 aria-label={expandida ? "Contraer fila" : "Expandir fila"}
                                                 aria-expanded={expandida}
-                                                className="mx-auto flex h-11 w-11 md:h-8 md:w-8 items-center justify-center rounded hover:bg-hover-background"
+                                                className={cn(
+                                                    "mx-auto flex items-center justify-center rounded hover:bg-hover-background",
+                                                    claseObjetivo
+                                                )}
                                             >
                                                 {expandida ? (
                                                     <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -669,7 +774,7 @@ export function DataTable<TData>({
                                     )}
                                     {enableRowSelection && (
                                         <td className="w-12 md:w-10 px-1 text-center align-middle bg-surface border-b border-border" style={{ minWidth: 44 }}>
-                                            <span className="flex h-11 w-11 md:h-8 md:w-8 items-center justify-center">
+                                            <span className={cn("flex items-center justify-center", claseObjetivo)}>
                                                 <Checkbox
                                                     checked={row.getIsSelected()}
                                                     onCheckedChange={(checked) => row.toggleSelected(!!checked)}
@@ -717,6 +822,7 @@ export function DataTable<TData>({
                 onPageSizeChange={onPageSizeChange ?? ((ps) => table.setPageSize(ps))}
                 pageSizeOptions={pageSizeOptions}
             />
+            </div>
         </div>
     )
 }

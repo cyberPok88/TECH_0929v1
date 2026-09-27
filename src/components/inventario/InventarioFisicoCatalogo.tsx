@@ -236,6 +236,8 @@ export function InventarioFisicoCatalogo() {
             <ConteoFilters
                 filtros={filtros}
                 onFiltrosChange={(patch) => {
+                    // ⭐ MEJORA 26 Sep 2026 — anunciar la recarga (ver ExistenciasCatalogo).
+                    setEstadoTabla('loading')
                     setFiltros((prev) => ({ ...prev, ...patch }))
                     setPagina(1)
                 }}

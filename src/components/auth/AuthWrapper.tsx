@@ -16,6 +16,19 @@ import { useAuth, useAuthStoreBase } from '@/lib/stores/auth-store'
 import { rehidratarSesionAction } from '@/lib/actions/auth'
 import { Loader2 } from 'lucide-react'
 
+/**
+ * ⭐ FIX 24 Sep 2026 — huella de la sesión (menú + permisos), para re-aplicar la rehidratación
+ * SOLO cuando el servidor dice algo distinto y no provocar re-renders en cada navegación.
+ */
+function huellaSesion(s: {
+    menu?: { href: string }[] | null
+    permisos?: { href: string; clave_accion: string }[] | null
+}): string {
+    const menu = (s.menu ?? []).map((m) => m.href).sort().join('|')
+    const permisos = (s.permisos ?? []).map((p) => `${p.href}:${p.clave_accion}`).sort().join('|')
+    return `${menu}::${permisos}`
+}
+
 interface AuthWrapperProps {
     children: React.ReactNode
 }
@@ -51,9 +64,18 @@ export function AuthWrapper({ children }: AuthWrapperProps) {
                 return
             }
 
-            // El store ya tiene sesión (navegación interna del dashboard):
-            // solo apagar el loading — no rehidratar para evitar re-renders
-            if (useAuthStoreBase.getState().isAuthenticated) {
+            // El store ya tiene sesión (navegación interna del dashboard).
+            //
+            // ⭐ FIX 24 Sep 2026 (RBAC VIVO) — antes este bloque DESCARTABA la respuesta y solo
+            // apagaba el loading. El store persistido en localStorage conserva `permisos[]` y
+            // `menu[]` del LOGIN, así que un cambio de permisos en la BD (una semilla nueva o el
+            // editor de roles) **no llegaba a la sesión abierta ni con F5**: el botón «Cotejar y
+            // dar alta» seguía deshabilitado por un `useCanAction` viejo aunque la BD ya lo
+            // autorizara. El servidor es la fuente de verdad: si la huella cambió, se aplica.
+            // (La RPC ya se estaba llamando; el fix no agrega viajes.)
+            const actual = useAuthStoreBase.getState()
+            if (actual.isAuthenticated) {
+                if (huellaSesion(actual) !== huellaSesion(data)) setSesion(data)
                 setLoading(false)
                 setChecking(false)
                 return

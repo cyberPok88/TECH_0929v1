@@ -94,7 +94,9 @@ export function Pagination({
                     value={pageSize}
                     onChange={(e) => onPageSizeChange(Number(e.target.value))}
                     className={cn(
-                        "h-8 px-2 py-1 text-sm",
+                        // ⭐ MEJORA 26 Sep 2026 — `h-11 md:h-8`: el selector de filas por
+                        // página medía 32px de alto, por debajo de la Ley 5 en móvil.
+                        "h-11 px-2 py-1 text-sm md:h-8",
                         "bg-surface border border-border",
                         "focus:outline-none focus:ring-2 focus:ring-primary",
                         "cursor-pointer"
@@ -109,12 +111,16 @@ export function Pagination({
                 </select>
             </div>
 
-            {/* Controles de navegación */}
+            {/* Controles de navegación.
+                ⭐ MEJORA 26 Sep 2026 — `h-11 w-11 md:h-8 md:w-8` en los 4 botones:
+                medían 36px y en móvil quedaban por debajo de la Ley 5 (44px); es
+                el MISMO patrón que ya usa DataTable en sus acciones de fila. */}
             <div className="flex items-center gap-1">
                 {/* Primera página */}
                 <Button
                     variant="ghost"
                     size="icon"
+                    className="h-11 w-11 md:h-8 md:w-8"
                     onClick={() => onPageChange(1)}
                     disabled={page === 1}
                     aria-label="Primera página"
@@ -127,6 +133,7 @@ export function Pagination({
                 <Button
                     variant="ghost"
                     size="icon"
+                    className="h-11 w-11 md:h-8 md:w-8"
                     onClick={() => onPageChange(page - 1)}
                     disabled={page === 1}
                     aria-label="Página anterior"
@@ -167,6 +174,7 @@ export function Pagination({
                 <Button
                     variant="ghost"
                     size="icon"
+                    className="h-11 w-11 md:h-8 md:w-8"
                     onClick={() => onPageChange(page + 1)}
                     disabled={page === totalPages}
                     aria-label="Página siguiente"
@@ -179,6 +187,7 @@ export function Pagination({
                 <Button
                     variant="ghost"
                     size="icon"
+                    className="h-11 w-11 md:h-8 md:w-8"
                     onClick={() => onPageChange(totalPages)}
                     disabled={page === totalPages}
                     aria-label="Última página"

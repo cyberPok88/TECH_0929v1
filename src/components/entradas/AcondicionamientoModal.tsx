@@ -67,14 +67,43 @@ export function AcondicionamientoModal({ open, onOpenChange, entrada, onGuardado
                         <p className="text-sm text-muted-foreground">Sin aprobadas.</p>
                     ) : (
                         <ul className="space-y-1 text-sm">
-                            {aprobadas.map((a) => (
-                                <li key={a.id} className="flex justify-between">
-                                    <span className="font-mono text-xs tabular-nums">{a.producto_sku ?? '—'}</span>
-                                    <span className="tabular-nums">{a.cantidad_aprobada}</span>
-                                </li>
-                            ))}
+                            {aprobadas.map((a) => {
+                                // ⭐ MEJORA 25 — el saldo, no el total: lo que ya salió por tanda no se
+                                // vuelve a limpiar ni vuelve a subir stock al cerrar la entrada.
+                                const pendiente = Math.max(
+                                    0,
+                                    Number(a.cantidad_aprobada) - Number(a.cantidad_liberada ?? 0)
+                                )
+                                return (
+                                    <li
+                                        key={a.id}
+                                        className="flex items-center justify-between gap-3"
+                                    >
+                                        <span className="font-mono text-xs tabular-nums">
+                                            {a.producto_sku ?? '—'}
+                                        </span>
+                                        <span className="tabular-nums">
+                                            <b>{pendiente}</b>
+                                            {a.cantidad_liberada > 0 && (
+                                                <span className="ml-2 text-[11.5px] text-chart-4">
+                                                    {a.cantidad_liberada} ya en limpieza
+                                                </span>
+                                            )}
+                                        </span>
+                                    </li>
+                                )
+                            })}
                         </ul>
                     )}
+                    {aprobadas.every(
+                        (a) => Number(a.cantidad_aprobada) - Number(a.cantidad_liberada ?? 0) <= 0
+                    ) &&
+                        aprobadas.length > 0 && (
+                            <p className="rounded-md border border-success/40 bg-success/10 px-3 py-2 text-[12.5px]">
+                                Todo lo aprobado ya salió por <b>tandas</b>. Esta acción solo cierra el
+                                acondicionamiento del documento.
+                            </p>
+                        )}
                 </div>
                 <DialogFooter>
                     <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={cargando}>

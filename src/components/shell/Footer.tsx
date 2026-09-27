@@ -19,11 +19,18 @@ export function Footer() {
     const anio = new Date().getFullYear()
 
     return (
-        <footer className="border-t border-border px-6 py-3">
+        // ⭐ MEJORA 26 Sep 2026 — el Shell es `fixed inset-0 … overflow-hidden`:
+        // cada píxel del pie sale del alto de la tabla. En móvil la coletilla
+        // «by Tech Computer · Sistema de Control de Ventas» envolvía a 2 líneas
+        // (~57px); se oculta bajo sm y queda la marca + el año en una sola.
+        // `shrink-0`: es una banda fija del layout, no un flex item elástico.
+        <footer className="shrink-0 border-t border-border px-4 py-3 md:px-6">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                 <span>
                     <span className="font-display font-semibold">Tenochtitlán</span>
-                    {' by Tech Computer · Sistema de Control de Ventas'}
+                    <span className="hidden sm:inline">
+                        {' by Tech Computer · Sistema de Control de Ventas'}
+                    </span>
                 </span>
                 <span className="font-mono">© {anio}</span>
             </div>

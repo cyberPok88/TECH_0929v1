@@ -542,7 +542,12 @@ export function ProveedoresCatalogo() {
         <div className="flex flex-col gap-4">
             <ProveedorFilters
                 filtros={filtros}
-                onFiltrosChange={(patch) => setFiltros((f) => ({ ...f, ...patch }))}
+                onFiltrosChange={(patch) => {
+                    // ⭐ MEJORA 26 Sep 2026 — anunciar la recarga: el efecto que trae los datos
+                    // no puede poner `loading` (cero setState en efectos), lo pone el handler.
+                    setEstadoTabla('loading')
+                    setFiltros((f) => ({ ...f, ...patch }))
+                }}
                 contador={proveedores.length}
                 disabled={estadoTabla === 'loading'}
             />
