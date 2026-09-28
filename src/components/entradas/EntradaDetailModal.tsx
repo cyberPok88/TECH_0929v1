@@ -9,11 +9,12 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeft, Check, Clock, FileDown } from 'lucide-react'
 
-import { Pildora } from '@/components/data-table'
+import { CLASE_THEAD_TABLA, Pildora } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { DocumentoImprimibleDialog } from '@/components/entradas/DocumentoImprimibleDialog'
+import { DocumentoImprimible } from '@/components/imprimibles'
 import { NotaEntradaImprimible } from '@/components/entradas/NotaEntradaImprimible'
+import { construirDatosNotaEntrada } from '@/components/entradas/datos-nota-entrada'
 import { devPendiente } from '@/components/entradas/columnas-entrada'
 import { listarPartidasEntrada } from '@/lib/actions/entradas'
 import { cn } from '@/lib/utils'
@@ -129,7 +130,7 @@ export function EntradaDetailModal({ open, onOpenChange, entrada }: EntradaDetai
 
                         <div className="rounded border">
                             <table className="w-full text-sm">
-                                <thead className="border-b bg-muted/50 text-center text-muted-foreground">
+                                <thead className={`${CLASE_THEAD_TABLA} text-center`}>
                                     <tr>
                                         <th className="px-3 py-2">#</th>
                                         <th className="px-3 py-2">Clasificación</th>
@@ -206,16 +207,20 @@ export function EntradaDetailModal({ open, onOpenChange, entrada }: EntradaDetai
                     </div>
                 </DialogContent>
             </Dialog>
-            <DocumentoImprimibleDialog
+            {/* ⭐ MEJORA 27 Sep 2026 (carril de plantillas) — el expediente imprime el MISMO
+                papel que Recepción, y por el mismo camino: plantilla activa del tipo
+                `nota_entrada` si existe; si no, el respaldo en código. */}
+            <DocumentoImprimible
+                tipo="nota_entrada"
+                datos={entrada ? construirDatosNotaEntrada(entrada, partidas) : {}}
                 open={imprimir && entrada !== null}
                 onOpenChange={(abierto) => {
                     if (!abierto) setImprimir(false)
                 }}
                 titulo="Nota de entrada"
                 nombreArchivo={`entrada-${entrada?.folio ?? 'sin-folio'}`}
-            >
-                {entrada ? <NotaEntradaImprimible entrada={entrada} partidas={partidas} /> : null}
-            </DocumentoImprimibleDialog>
+                fallback={NotaEntradaImprimible}
+            />
         </>
     )
 }

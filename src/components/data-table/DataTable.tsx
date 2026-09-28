@@ -33,10 +33,12 @@ import { TableSkeleton } from "./TableSkeleton"
 import { Pagination } from "./Pagination"
 import { ColumnSelector } from "./ColumnSelector"
 import { FiltroColumnaBoton } from "./filtros/FiltroColumna"
+import { BotonDespliegue } from "./BotonDespliegue"
+import { CLASE_TH_KIT, CLASE_TD_FILA } from "./estilos-tabla"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
-import { AlertCircle, FilterX, Loader2, ChevronUp, ChevronDown, ChevronRight, Minus } from "lucide-react"
+import { AlertCircle, FilterX, Loader2, ChevronUp, ChevronDown, Minus } from "lucide-react"
 import type {
     DataTableProps,
     ColumnDefExtension,
@@ -97,6 +99,8 @@ export function DataTable<TData>({
     modoTactil = false,
     // ⭐ PROMOCIÓN 20 Sep 2026 — fila expandible (Guía 1.6 Entradas → kit 0.8)
     renderFilaExpandida,
+    // ⭐ MEJORA 34 (usuario) — un detalle a la vez (acordeón). Default: varias, como siempre.
+    unaFilaExpandida = false,
     // ⭐ MEJORA 20 Sep 2026 — alineación de los DATOS (default: centrado)
     alineacionDatos = "centro",
 }: DataTableProps<TData>) {
@@ -170,8 +174,19 @@ export function DataTable<TData>({
     // ⭐ PROMOCIÓN 20 Sep 2026 — filas expandidas (fila expandible genérica).
     // Estado interno por rowKey; el consumidor solo aporta el contenido.
     const [filasExpandidas, setFilasExpandidas] = useState<Record<string, boolean>>({})
+    /**
+     * ⭐ MEJORA 34 (usuario, 27 Sep 2026) — con `unaFilaExpandida` los detalles son un **acordeón**:
+     * abrir uno cierra el anterior (y volver a pulsarlo cierra todo). Por defecto la tabla mantiene el
+     * comportamiento de siempre (varias filas expandidas a la vez).
+     */
     const alternarExpandida = (clave: string) =>
-        setFilasExpandidas((prev) => ({ ...prev, [clave]: !prev[clave] }))
+        setFilasExpandidas((prev) =>
+            unaFilaExpandida
+                ? prev[clave]
+                    ? {}
+                    : { [clave]: true }
+                : { ...prev, [clave]: !prev[clave] }
+        )
     const isSelectionControlled =
         enableRowSelection && rowSelection !== undefined && onRowSelectionChange !== undefined
     const effectiveSelection = isSelectionControlled ? rowSelection! : internalSelection
@@ -512,9 +527,13 @@ export function DataTable<TData>({
 
     const claseHeader = (header: Header<TData, unknown>) =>
         cn(
-            "sticky top-0 h-11 md:h-10 px-3 align-middle",
-            "font-medium text-muted-foreground",
-            "border-b border-border bg-surface-2",
+            // ⭐ MEJORA 26 Sep 2026 — el encabezado es CROMO (fuente única en `estilos-tabla`):
+            // banda `bg-th` + versalitas + regla de 2px. Antes era `font-medium
+            // text-muted-foreground` sobre `bg-surface-2`, y en el tema claro `surface-2`
+            // (0.995) y `surface` (0.985) redondeaban al MISMO píxel: el encabezado se veía
+            // igual que la fila. Medido sobre captura: los dos `#fefdfa`.
+            CLASE_TH_KIT,
+            "h-11 px-3 md:h-10",
             claseAlineacion(header.column.columnDef, false),
             extDe(header.column.columnDef).movil === "ocultar" && "hidden md:table-cell",
             extDe(header.column.columnDef).movil === "secundaria" && "max-w-[110px] md:max-w-none",
@@ -527,7 +546,8 @@ export function DataTable<TData>({
 
     const claseCelda = (cell: Cell<TData, unknown>) =>
         cn(
-            "px-3 align-middle border-b border-border bg-surface",
+            "px-3 align-middle bg-surface",
+            CLASE_TD_FILA,
             densidadEfectiva === "compacto" ? "py-1.5" : "py-3",
             claseAlineacion(cell.column.columnDef, true),
             extDe(cell.column.columnDef).movil === "ocultar" && "hidden md:table-cell",
@@ -610,14 +630,14 @@ export function DataTable<TData>({
                                 // contenido que existe en AMBOS lados y mide igual arriba y abajo.
                                 <th
                                     scope="col"
-                                    className="sticky top-0 z-[5] w-10 px-1 text-center align-middle font-medium text-muted-foreground bg-surface-2 border-b border-border"
+                                    className={cn(CLASE_TH_KIT, 'w-10 px-1 text-center')}
                                 >
                                     Detalles
                                 </th>
                             )}
                             {enableRowSelection && (
                                 <th
-                                    className="sticky top-0 z-[5] w-12 md:w-10 px-1 text-center align-middle bg-surface-2 border-b border-border"
+                                    className={cn(CLASE_TH_KIT, 'w-12 px-1 text-center md:w-10')}
                                     style={{ minWidth: 44 }}
                                 >
                                     {/* R3: área táctil ≥44px en <768px (Ley 5) */}
@@ -735,7 +755,7 @@ export function DataTable<TData>({
                             {/* ⭐ COMPAT (REDISEÑO 02 Sep): renderRowActions deprecado —
                                 ahora sí con <th> "Acciones" + sticky (antes no tenía header). */}
                             {renderRowActions && (
-                                <th className="sticky top-0 right-0 z-[6] h-11 md:h-10 px-3 text-right align-middle font-medium text-muted-foreground bg-surface-2 border-b border-border shadow-[inset_1px_0_0_var(--border)]">
+                                <th className={cn(CLASE_TH_KIT, 'right-0 z-[6] h-11 px-3 text-right md:h-10 shadow-[inset_1px_0_0_var(--border)]')}>
                                     Acciones
                                 </th>
                             )}
@@ -750,26 +770,26 @@ export function DataTable<TData>({
                             <Fragment key={claveFila}>
                                 <tr
                                     data-state={row.getIsSelected() ? "selected" : undefined}
-                                    className="group"
+                                    // ⭐ MEJORA 34 (usuario) — **la fila ABIERTA se pinta**: al desplegar
+                                    // los detalles, su fila de entrada cambia de color para que se sepa
+                                    // cuál se está viendo. Se tiñe por variante arbitraria sobre la fila
+                                    // (`[&>td]`) porque las celdas traen `bg-surface` propio: la
+                                    // especificidad del descendiente (0,1,1) gana sobre la de la celda
+                                    // (0,1,0) y el tinte cubre la fila entera, no solo una columna.
+                                    className={cn("group", expandida && "[&>td]:bg-primary-bg/50")}
                                 >
                                     {renderFilaExpandida && (
-                                        <td className="w-10 px-1 text-center align-middle bg-surface border-b border-border">
-                                            <button
-                                                type="button"
-                                                onClick={() => alternarExpandida(claveFila)}
-                                                aria-label={expandida ? "Contraer fila" : "Expandir fila"}
-                                                aria-expanded={expandida}
-                                                className={cn(
-                                                    "mx-auto flex items-center justify-center rounded hover:bg-hover-background",
-                                                    claseObjetivo
-                                                )}
-                                            >
-                                                {expandida ? (
-                                                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                                                ) : (
-                                                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                                                )}
-                                            </button>
+                                        <td className={cn('w-10 bg-surface px-1 text-center', CLASE_TD_FILA)}>
+                                            {/* ⭐ MEJORA 26 Sep 2026 — el MISMO `BotonDespliegue`
+                                                que usa la fila de PARTIDA en la tabla de detalle:
+                                                un solo gesto en los dos niveles. */}
+                                            <BotonDespliegue
+                                                abierto={expandida}
+                                                onAlternar={() => alternarExpandida(claveFila)}
+                                                sujeto={`la fila ${claveFila}`}
+                                                controles={`detalle-${claveFila}`}
+                                                className="mx-auto"
+                                            />
                                         </td>
                                     )}
                                     {enableRowSelection && (
@@ -798,10 +818,16 @@ export function DataTable<TData>({
                                     )}
                                 </tr>
                                 {renderFilaExpandida && expandida && (
-                                    <tr>
+                                    <tr id={`detalle-${claveFila}`}>
                                         <td
                                             colSpan={totalColumnas}
-                                            className="border-b border-border bg-surface-2 px-3 py-3"
+                                            // ⭐ MEJORA 26 Sep 2026 — LA FILA DE DETALLE SE HUNDE.
+                                            // Antes usaba `bg-surface-2`, el MISMO tono del
+                                            // encabezado: el contenedor del detalle se leía como
+                                            // otra banda de encabezado. Con el tono del papel
+                                            // (`bg-background`) se lee como un hueco DENTRO de la
+                                            // fila — que es lo que es.
+                                            className="border-b border-border bg-background px-3 py-3"
                                         >
                                             {renderFilaExpandida(row.original)}
                                         </td>

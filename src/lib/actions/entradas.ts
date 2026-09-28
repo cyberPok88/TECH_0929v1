@@ -37,6 +37,8 @@ import type {
     TandaLiberada,
     CategoriaCapturable,
     HuellaDevuelta,
+    EtapasDeIngreso,
+    LiberacionDeIngreso,
 } from '@/types/entradas'
 // ⭐ FIX 25 Sep 2026 — valor (no tipo): la misma puerta que consulta la UI.
 import { puedeLiberar, puedeAjustarNota } from '@/types/entradas'
@@ -1820,7 +1822,19 @@ export async function ajustarYGenerarNota(
         (s, l) => s + Number(l.cantidad_pendiente ?? 0),
         0
     )
-    const cerrada = todoPorTandas && cotejo.success && saldoPorIngresar === 0
+    // ⭐ MEJORA 33 (27 Sep 2026) — **LIBERAR NO ES INGRESAR.** `Σ aprobadas − Σ liberadas = 0` dice
+    // que nada quedó por liberar, pero **no** que la mercancía haya entrado al stock: medido en
+    // `ING-0001`, la entrada quedó `confirmada` —con `fecha_fin_almacen` y la nota en `recibida`—
+    // **con 8 piezas `en_almacen` esperando cotejo y 0 lotes**. La misma regla vive en
+    // `fn_confirmar_alta` (§0.17): ninguna tanda puede quedar sin `confirmada`.
+    // Fail-closed: si la lectura falla (`count` null) NO se cierra — `-1 !== 0`.
+    const { count: tandasSinConfirmar } = await supabase
+        .from('liberaciones_entrada')
+        .select('id', { count: 'exact', head: true })
+        .eq('id_entrada', idEntrada)
+        .neq('estado', 'confirmada')
+    const todoIngresado = (tandasSinConfirmar ?? -1) === 0
+    const cerrada = todoPorTandas && cotejo.success && saldoPorIngresar === 0 && todoIngresado
     if (cerrada) {
         const { error: errCierre } = await supabase.rpc('fn_confirmar_alta', { p_id_entrada: idEntrada })
         if (errCierre) return { success: false, error: errCierre.message }
@@ -2003,6 +2017,116 @@ export async function abrirCotejoAlta(idEntrada: string): Promise<RespuestaDato<
         }
     })
     return { success: true, data: { lineas } }
+}
+
+/**
+ * ⭐ MEJORA 27 Sep 2026 (Fase 1 · Recepción) — **LAS ETAPAS DE UN INGRESO** (solo lectura).
+ *
+ * *«Recepción es un puesto importante, prácticamente un usuario administrador que ve todas las
+ * etapas … para que él pueda revisar cómo va evolucionando las cosas sin abandonar Entradas»*.
+ *
+ * Junta lo que las etapas ya saben y que ninguna acción devolvía **por entrada**:
+ *   · **Acondicionamiento** — las liberaciones de ESTE ingreso, fila por fila (bandeja, piezas,
+ *     estado y sus tres fechas). Es lo único que no existía: `listarBandejas` devuelve la **cola**
+ *     del acondicionador, no las bandejas de un ingreso.
+ *   · **Almacén** — las `CotejoLinea` que ya produce `abrirCotejoAlta` (**la misma definición**, no
+ *     una copia: dos maneras de leer el cotejo serían dos maneras de mentir).
+ *   · **Divergencias** — solo las de esta entrada.
+ *
+ * ⚠️ **Cero escritura.** Las etapas se consultan desde un puesto que no es el suyo: la RLS por etapa
+ * (MEJORA 26) sigue siendo la única autoridad y este read no la rodea.
+ * (Decisión ⑧ del mockup `toolbar-detalles-etapas-recepcion.html`, aprobado el 27 Sep 2026.)
+ */
+export async function listarEtapasDeIngreso(
+    idEntrada: string
+): Promise<RespuestaDato<EtapasDeIngreso>> {
+    const supabase = await createClient()
+
+    const { data, error } = await supabase
+        .from('liberaciones_entrada')
+        .select(
+            'id, tanda, cantidad, estado, fecha_liberacion, fecha_inicio_acond, fecha_entrega, fecha_confirmacion, partidas_resueltas(id_marca, atributos, marcas_producto(nombre), partidas_entrada(partida))'
+        )
+        .eq('id_entrada', idEntrada)
+        .order('tanda', { ascending: true })
+        .order('created_at', { ascending: true })
+    if (error) return { success: false, error: error.message }
+
+    const acondicionamiento: LiberacionDeIngreso[] = ((data ?? []) as unknown as {
+        id: string
+        tanda: number | null
+        cantidad: number
+        estado: string
+        fecha_liberacion: string | null
+        fecha_inicio_acond: string | null
+        fecha_entrega: string | null
+        fecha_confirmacion: string | null
+        partidas_resueltas: {
+            atributos: Record<string, unknown> | null
+            marcas_producto: { nombre: string | null } | null
+            partidas_entrada: { partida: number } | null
+        } | null
+    }[]).map((l) => ({
+        id: l.id,
+        tanda: l.tanda,
+        partida_numero: l.partidas_resueltas?.partidas_entrada?.partida ?? null,
+        marca_nombre: l.partidas_resueltas?.marcas_producto?.nombre ?? null,
+        atributos: l.partidas_resueltas?.atributos ?? {},
+        cantidad: Number(l.cantidad ?? 0),
+        estado: l.estado as LiberacionDeIngreso['estado'],
+        fecha_liberacion: l.fecha_liberacion,
+        fecha_inicio_acond: l.fecha_inicio_acond,
+        fecha_entrega: l.fecha_entrega,
+        fecha_confirmacion: l.fecha_confirmacion,
+    }))
+
+    const [cotejo, divergencias] = await Promise.all([
+        abrirCotejoAlta(idEntrada),
+        supabase
+            .from('divergencias')
+            .select(
+                'id, id_entrada, cantidad_esperada, cantidad_encontrada, id_causa, causas_divergencia(nombre), responsable, cantidad_autorizada, estado, creado_por, created_at'
+            )
+            .eq('id_entrada', idEntrada)
+            .order('created_at', { ascending: false }),
+    ])
+
+    const filasDiv = ((divergencias.data ?? []) as unknown as {
+        id: string
+        id_entrada: string
+        cantidad_esperada: number
+        cantidad_encontrada: number
+        id_causa: string
+        causas_divergencia: { nombre: string | null } | null
+        responsable: string | null
+        cantidad_autorizada: number | null
+        estado: string
+        creado_por: string | null
+        created_at: string
+    }[]).map((d) => ({
+        id: d.id,
+        id_entrada: d.id_entrada,
+        // El folio no hace falta dentro del modal (ya se sabe de qué ingreso es): se deja nulo.
+        entrada_folio: null,
+        cantidad_esperada: d.cantidad_esperada,
+        cantidad_encontrada: d.cantidad_encontrada,
+        id_causa: d.id_causa,
+        causa_nombre: d.causas_divergencia?.nombre ?? null,
+        responsable: d.responsable,
+        cantidad_autorizada: d.cantidad_autorizada,
+        estado: d.estado as Divergencia['estado'],
+        creado_por: d.creado_por,
+        created_at: d.created_at,
+    }))
+
+    return {
+        success: true,
+        data: {
+            acondicionamiento,
+            cotejo: cotejo.success ? (cotejo.data?.lineas ?? []) : [],
+            divergencias: filasDiv,
+        },
+    }
 }
 
 /**

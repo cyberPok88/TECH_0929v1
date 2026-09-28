@@ -522,6 +522,45 @@ export interface LiberarAvanceInput {
     notas?: string
 }
 
+/**
+ * ⭐ MEJORA 27 Sep 2026 (Fase 1 · Recepción) — **UNA LIBERACIÓN de ESTE ingreso**, fila por fila: es
+ * la bandeja del acondicionador con sus tres fechas (liberación · inicio de limpieza · entrega).
+ *
+ * ⚠️ No es `BandejaLiberada`: esa es la unidad de la **cola** del acondicionador (agrupa las tandas
+ * de un grupo). Aquí se lee el documento: lo que salió de ESTA entrada, en orden de tanda.
+ */
+export interface LiberacionDeIngreso {
+    id: string
+    tanda: number | null
+    partida_numero: number | null
+    marca_nombre: string | null
+    atributos: Record<string, unknown>
+    cantidad: number
+    estado: EstadoTanda
+    fecha_liberacion: string | null
+    fecha_inicio_acond: string | null
+    fecha_entrega: string | null
+    fecha_confirmacion: string | null
+}
+
+/**
+ * ⭐ MEJORA 27 Sep 2026 (Fase 1 · Recepción) — **LAS ETAPAS DE UN INGRESO** (solo lectura).
+ *
+ * El pedido del usuario: *«Recepción es un puesto importante, prácticamente es un usuario
+ * administrador que ve todas las etapas, tiene jerarquía alta, y justo es para que él pueda revisar
+ * cómo va evolucionando las cosas sin abandonar Entradas»*.
+ *
+ * Las cuatro etapas se leen con UN solo read (`listarEtapasDeIngreso`) que junta lo que cada etapa ya
+ * sabe: Recepción y Revisión con `listarPartidasConAvance`, Almacén con `abrirCotejoAlta` (misma
+ * definición de las líneas de cotejo, no una copia) y Acondicionamiento con las liberaciones de este
+ * ingreso. **Cero escritura**: es consulta pura (decisión ⑧ del mockup aprobado el 27 Sep 2026).
+ */
+export interface EtapasDeIngreso {
+    acondicionamiento: LiberacionDeIngreso[]
+    cotejo: CotejoLinea[]
+    divergencias: Divergencia[]
+}
+
 // ── Alta/almacén: cotejo físico ────────────────────────────────────────────────
 export interface CotejoLinea {
     id_partida_resuelta: string
@@ -664,7 +703,9 @@ export const TEXTO_ETAPA_RECEPCION: Record<EstadoEntrada, string> = {
     // no hay nada que ajustar, solo se genera la nota. Decía «Ajustar y generar nota», que manda a
     // ajustar algo que no existe. `con_dev` (sí hubo rechazos) conserva el verbo completo.
     revisada_sin_dev: 'Generar nota',
-    con_dev: 'Ajustar y generar nota',
+    // ⭐ MEJORA 27 Sep 2026 (usuario) — «Ajustar + nota»: la MISMA frase que el botón de la acción
+    // (una sola forma de nombrarla en toda la pantalla). Dice las dos cosas que hace, corto.
+    con_dev: 'Ajustar + nota',
     // ⭐ FIX 25 Sep 2026 (usuario · ING-0002) — decía **«Cerrada»**: Recepción ya hizo lo suyo (la
     // nota está generada) pero la entrada **sigue viva** esperando acondicionamiento. El texto dice
     // el hecho consumado —lo que Recepción produjo— y no un cierre que no ocurrió. El tono sigue

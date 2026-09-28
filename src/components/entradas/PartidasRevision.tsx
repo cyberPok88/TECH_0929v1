@@ -53,6 +53,27 @@ interface PartidasRevisionProps {
      * los controles es `PartidasAvance`.
      */
     tactil?: boolean
+    /**
+     * ⭐ FIX 25 Sep 2026 (usuario) — **contador de refresco**: cada vez que algo cambia lo que este
+     * desglose pinta (una liberación, el ajuste de la DEV, el wizard), quien lo hospeda lo incrementa y
+     * el efecto **vuelve a consultar** `listarPartidasConAvance`. Sin él, el desglose se quedaba con los
+     * datos del montaje: *«sigue apareciendo el botón en cada fila … se actualiza solo hasta que cierro
+     * los detalles y los vuelvo a abrir»*.
+     */
+    refresco?: number
+    /**
+     * ⭐ MEJORA 34 — el desglose **presta sus datos** a la toolbar de la PÁGINA y avisa cuando se
+     * cierra: `datos = null` significa *«los detalles de ESTA entrada se plegaron»*.
+     *
+     * ⚠️ El aviso de cierre es obligatorio, y se dice por qué: sin él la toolbar se quedaba con la
+     * última entrada abierta y su botón seguía activo imprimiendo esa —*«cuando lo cierro los detalles
+     * el botón sigue activo, tengo que abrir otro para que cambie»*—.
+     * ⚠️ Quien lo pase debe **memoizarlo** (`useCallback`): entra en las dependencias del efecto.
+     */
+    onDatos?: (
+        idEntrada: string,
+        datos: { entrada: Entrada; partidas: PartidaConAvance[] } | null
+    ) => void
 }
 
 export function PartidasRevision({
@@ -62,6 +83,8 @@ export function PartidasRevision({
     onVerResultado,
     onLiberar,
     tactil = false,
+    refresco = 0,
+    onDatos,
 }: PartidasRevisionProps) {
     const [partidas, setPartidas] = useState<PartidaConAvance[]>([])
     const [cargando, setCargando] = useState(true)
@@ -70,13 +93,22 @@ export function PartidasRevision({
         let activo = true
         void listarPartidasConAvance(entrada.id).then((r) => {
             if (!activo) return
-            if (r.success) setPartidas(r.data ?? [])
+            if (r.success) {
+                setPartidas(r.data ?? [])
+                // ⭐ MEJORA 34 — se los presta a la toolbar de la página (ver `onDatos`).
+                onDatos?.(entrada.id, { entrada, partidas: r.data ?? [] })
+            }
             setCargando(false)
         })
         return () => {
             activo = false
+            // ⭐ MEJORA 34 — los detalles se plegaron: la toolbar de la página debe soltar ESTA
+            // entrada (si no, su botón seguiría activo imprimiendo la que ya no se ve).
+            onDatos?.(entrada.id, null)
         }
-    }, [entrada.id])
+        // ⭐ FIX 25 Sep 2026 — `refresco` en las dependencias: es lo que hace que una liberación (o un
+        // guardado del wizard) se vea en el desglose SIN cerrar y reabrir el acordeón.
+    }, [entrada.id, refresco, entrada, onDatos])
 
     return (
         // ⭐ 24 Sep 2026 (usuario) — el desglose se ANIDA al padre y se ve que es suyo: **riel** de
@@ -85,7 +117,7 @@ export function PartidasRevision({
         // alineada con la columna Folio del padre, como un hijo en un árbol. Más el ancho tope:
         // antes medía lo mismo que la tabla padre y no se leía como «esto pertenece a la fila de
         // arriba» (*«que realmente se vea quién es el padre y cuáles sus detalles»*).
-        <div className="flex max-w-[1080px] flex-col gap-3 border-l-2 border-acc-entradas/50 pl-14 pr-2">
+        <div className="flex max-w-[1320px] flex-col gap-3 border-l-2 border-acc-entradas/50 pl-14 pr-2">
             <PartidasAvance
                 entrada={entrada}
                 partidas={partidas}

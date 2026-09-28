@@ -17,6 +17,7 @@
         "cobertura": "node ../scripts/cobertura.mjs",
         "mojibake": "node ../scripts/limpiar-mojibake.mjs",
         "catalogo": "node ../scripts/catalogo-ui.mjs",
+        "estructura": "node ../scripts/estructura.mjs",
         "alinear": "node ../scripts/alinear.mjs"
     },
     "dependencies": {
@@ -40,6 +41,7 @@
         "clsx": "^2.1.1",
         "date-fns": "^4.1.0",
         "decimal.js": "^10.5.0",
+        "dompurify": "3.4.16",
         "framer-motion": "^11.18.2",
         "html2canvas": "^1.4.1",
         "jspdf": "^2.5.2",

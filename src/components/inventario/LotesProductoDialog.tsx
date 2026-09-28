@@ -17,6 +17,7 @@ import {
 import { listarLotesPorProducto } from '@/lib/actions/inventario'
 import type { LoteInventario } from '@/types/inventario'
 import type { ExistenciaProducto } from '@/types/inventario'
+import { CLASE_THEAD_TABLA } from '@/components/data-table'
 
 function fechaCorta(iso: string): string {
     const d = new Date(iso)
@@ -78,7 +79,7 @@ export function LotesProductoDialog({ producto, open, onOpenChange }: LotesProdu
                 {!cargando && lotes.length > 0 && (
                     <div className="overflow-auto rounded-md border border-border">
                         <table className="w-full text-sm">
-                            <thead className="bg-surface text-center text-xs uppercase text-muted-foreground">
+                            <thead className={`${CLASE_THEAD_TABLA} text-center`}>
                                 <tr>
                                     <th className="px-3 py-2">Fecha</th>
                                     <th className="px-3 py-2 text-center">Original</th>

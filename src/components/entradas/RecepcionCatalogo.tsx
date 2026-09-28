@@ -7,15 +7,15 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Download, Eye, FileText, Pencil, Plus } from 'lucide-react'
+import { Download, Eye, FileText, Pencil, Plus, Printer } from 'lucide-react'
 
 import { DataTable, crearColumnaAcciones } from '@/components/data-table'
 import type { EstadoTabla } from '@/components/data-table'
 import { usePageConfig } from '@/hooks/usePageConfig'
 import { useCanAction } from '@/hooks/useCanAction'
 import type { ToolbarAction } from '@/types/shell'
-import { listarEntradas } from '@/lib/actions/entradas'
-import type { Entrada, FiltrosEntradas } from '@/types/entradas'
+import { listarEntradas, listarPartidasEntrada } from '@/lib/actions/entradas'
+import type { Entrada, FiltrosEntradas, PartidaEntrada } from '@/types/entradas'
 import { RecepcionFilters, FILTROS_RECEPCION_DEFAULT, hayFiltrosRecepcion } from '@/components/entradas/RecepcionFilters'
 import { EntradaModal } from '@/components/entradas/EntradaModal'
 import { EntradaDetailModal } from '@/components/entradas/EntradaDetailModal'
@@ -23,6 +23,10 @@ import { AjusteDevModal } from '@/components/entradas/AjusteDevModal'
 import { exportarEntradasCsv } from '@/components/entradas/exportar-entradas-csv'
 import { PartidasExpandidas } from '@/components/entradas/PartidasExpandidas'
 import { AvanceRevisionModal } from '@/components/entradas/AvanceRevisionModal'
+import { EtapasIngresoModal } from '@/components/entradas/EtapasIngresoModal'
+import { DocumentoImprimible } from '@/components/imprimibles'
+import { NotaEntradaImprimible } from '@/components/entradas/NotaEntradaImprimible'
+import { construirDatosNotaEntrada } from '@/components/entradas/datos-nota-entrada'
 import { NotaCompraDetalleModal } from '@/components/compras/NotaCompraDetalleModal'
 import {
     columnaFecha,
@@ -66,6 +70,25 @@ export function RecepcionCatalogo() {
     // ⭐ MEJORA 24 Sep 2026 (usuario) — «En revisión técnica» abre el AVANCE de la revisión: la
     // píldora del estado es la puerta (L3) y el avance se ve en la misma tabla de ítems de la Fase 2.
     const [avanceRevision, setAvanceRevision] = useState<Entrada | null>(null)
+    // ⭐ MEJORA 27 Sep 2026 (usuario) — la TOOLBAR DE DETALLES del desglose abre «Etapas del ingreso»:
+    // las 4 etapas en solo lectura, para que el puesto vea cómo evoluciona sin salir de su cola.
+    const [etapasIngreso, setEtapasIngreso] = useState<Entrada | null>(null)
+    /**
+     * ⭐ MEJORA 27 Sep 2026 (usuario) — **«falta el botón imprimir en la toolbar del shell»**: el papel
+     * de Recepción es la **nota de entrada**, y la imprime la entrada cuyos **detalles están abiertos**
+     * (el desglose avisa con `onExpandida`, mismo patrón que la toolbar de Revisión con el acta).
+     * Las **partidas declaradas** se piden al pulsar (no en cada despliegue): son solo para el papel.
+     */
+    const [expandida, setExpandida] = useState<Entrada | null>(null)
+    const [notaImprimible, setNotaImprimible] = useState<{
+        entrada: Entrada
+        partidas: PartidaEntrada[]
+    } | null>(null)
+
+    const imprimirNota = useCallback(async (e: Entrada) => {
+        const r = await listarPartidasEntrada(e.id)
+        setNotaImprimible({ entrada: e, partidas: r.success ? (r.data ?? []) : [] })
+    }, [])
 
     const puedeCrear = useCanAction(RUTA, 'crear')
     const puedeEditar = useCanAction(RUTA, 'editar')
@@ -144,7 +167,10 @@ export function RecepcionCatalogo() {
                         icon: FileText,
                         // ⭐ MEJORA 24 Sep 2026 (Fase 1) — vocabulario del piso (ley L7): el botón
                         // GENERA un documento, y ahora que va con etiqueta en la fila hay espacio.
-                        label: 'Ajustar y generar nota',
+                        // ⭐ MEJORA 27 Sep 2026 (usuario) — «Ajustar + nota»: la MISMA frase en los
+                        // controles de la acción (columna Final · desglose · toolbar · ⋮ · modal),
+                        // para no tener dos nombres para lo mismo (ley L7).
+                        label: 'Ajustar + nota',
                         // ⭐ FIX 24 Sep 2026 — decía `dataAccion: 'editar'`, el MISMO selector que
                         // Editar: cualquier prueba/automatización por `data-accion` los confundía.
                         // Con las dos ahora dentro del menú ⋮ el choque era visible en el mismo DOM.
@@ -240,8 +266,24 @@ export function RecepcionCatalogo() {
                 },
             })
         }
+        // ⭐ MEJORA 27 Sep 2026 (usuario) — «falta el botón imprimir en la toolbar del shell».
+        // Se activa cuando los detalles de una entrada están abiertos; apagado dice POR QUÉ.
+        lista.push({
+            id: 'imprimir-nota',
+            label: 'Imprimir nota',
+            icon: Printer,
+            accion: 'ver',
+            variant: 'outline',
+            disabled: !expandida,
+            title: expandida
+                ? `Nota de entrada de ${expandida.folio}, para firmar.`
+                : 'Abre los detalles de una entrada para imprimir su nota de entrada.',
+            onClick: () => {
+                if (expandida) void imprimirNota(expandida)
+            },
+        })
         return lista
-    }, [puedeCrear, puedeExportar, filtros])
+    }, [puedeCrear, puedeExportar, filtros, expandida, imprimirNota])
 
     const filtrosBarra = useMemo(
         () => <RecepcionFilters filtros={filtros} onFiltrosChange={manejarFiltros} contador={total} />,
@@ -288,8 +330,20 @@ export function RecepcionCatalogo() {
                 // las partidas de la entrada se ven dentro de su fila.
                 // ⭐ MEJORA 22 Sep 2026: recibe la FILA completa (no solo el id) para mostrar
                 // la evolución (declaradas → DEV → final) y el timeline sin otra consulta.
+                // ⭐ MEJORA 34 (usuario, 27 Sep 2026) — **un detalle a la vez** (mismo acordeón que la
+                // cola de Revisión): el patrón de detalles de Entradas es uno solo en las dos colas.
+                unaFilaExpandida
                 renderFilaExpandida={(e) => (
-                    <PartidasExpandidas entrada={e} onAjustar={(x) => setAjuste(x)} />
+                    // ⭐ MEJORA 27 Sep 2026 — la toolbar del desglose lleva las puertas de la ENTRADA:
+                    // «Etapas del ingreso» (las 4 etapas, solo lectura) y la nota cuando ya existe.
+                    <PartidasExpandidas
+                        entrada={e}
+                        onAjustar={(x) => setAjuste(x)}
+                        onVerEtapas={(x) => setEtapasIngreso(x)}
+                        onVerNota={(x) => setNotaDetalle(x.id_nota ?? null)}
+                        onImprimir={(x) => void imprimirNota(x)}
+                        onExpandida={setExpandida}
+                    />
                 )}
                 // ⚠️ DESCARTADO 24 Sep 2026 (usuario): se probó rotular el control de despliegue
                 // («2 partidas» → «Ocultar») y se vio **exagerado** — pidió «mínimo como estaba,
@@ -353,6 +407,38 @@ export function RecepcionCatalogo() {
                     if (!abierto) setAvanceRevision(null)
                 }}
                 entrada={avanceRevision}
+            />
+            {/* ⭐ MEJORA 27 Sep 2026 — la toolbar de detalles abre las 4 etapas del ingreso.
+                `key` calificada (`etapas-…`): el padre la monta por entrada, así que cada una abre su
+                propio estado y la etapa inicial sale del primer render (patrón `AvanceRevisionModal`). */}
+            <EtapasIngresoModal
+                key={`etapas-${etapasIngreso?.id ?? 'ninguna'}`}
+                open={etapasIngreso !== null}
+                onOpenChange={(abierto) => {
+                    if (!abierto) setEtapasIngreso(null)
+                }}
+                entrada={etapasIngreso}
+            />
+            {/* ⭐ MEJORA 27 Sep 2026 — el papel de Recepción, imprimible desde las DOS toolbars
+                (la del shell y la de detalles). Mismo documento que el expediente.
+                ⭐ MEJORA 27 Sep 2026 (carril de plantillas) — pasa por `DocumentoImprimible`:
+                si el tipo `nota_entrada` tiene una plantilla ACTIVA en la BD, se imprime ESA
+                (el diseño que el usuario armó en /dashboard/sistema/plantillas); si no, el
+                respaldo en código imprime lo de siempre. Desactivar la plantilla vuelve acá. */}
+            <DocumentoImprimible
+                tipo="nota_entrada"
+                datos={
+                    notaImprimible
+                        ? construirDatosNotaEntrada(notaImprimible.entrada, notaImprimible.partidas)
+                        : {}
+                }
+                open={notaImprimible !== null}
+                onOpenChange={(abierto) => {
+                    if (!abierto) setNotaImprimible(null)
+                }}
+                titulo="Nota de entrada"
+                nombreArchivo={`entrada-${notaImprimible?.entrada.folio ?? 'sin-folio'}`}
+                fallback={NotaEntradaImprimible}
             />
         </>
     )

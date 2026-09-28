@@ -107,7 +107,9 @@ export function EntradasDashboard() {
                                 <Link
                                     href={etapa.href}
                                     className={cn(
-                                        'inline-flex h-11 items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 text-[12px] font-semibold text-acc-entradas transition-colors md:h-8',
+                                        // ⭐ MEJORA 27 Sep 2026 — `rounded-md`: los chips de etapa son
+                                        // CONTROLES (navegan), no píldoras de estado.
+                                        'inline-flex h-11 items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 text-[12px] font-semibold text-acc-entradas transition-colors md:h-8',
                                         'hover:bg-hover-background',
                                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc-entradas'
                                     )}
@@ -120,7 +122,7 @@ export function EntradasDashboard() {
                                 </Link>
                             ) : (
                                 <span
-                                    className="inline-flex h-11 items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 text-[12px] font-semibold text-muted-foreground/60 md:h-8"
+                                    className="inline-flex h-11 items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 text-[12px] font-semibold text-muted-foreground/60 md:h-8"
                                 >
                                     {chip}
                                 </span>

@@ -7,7 +7,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ScanLine } from 'lucide-react'
+import { Printer, ScanLine } from 'lucide-react'
 
 import { DataTable } from '@/components/data-table'
 import type { EstadoTabla } from '@/components/data-table'
@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { usePageConfig } from '@/hooks/usePageConfig'
 import { useCanAction } from '@/hooks/useCanAction'
 import { listarEntradas } from '@/lib/actions/entradas'
-import type { Entrada, FiltrosEntradas } from '@/types/entradas'
+import type { Entrada, FiltrosEntradas, PartidaConAvance } from '@/types/entradas'
 import {
     RevisionFilters,
     FILTROS_REVISION_DEFAULT,
@@ -27,6 +27,9 @@ import { ResultadoRevisionModal } from '@/components/entradas/ResultadoRevisionM
 import { PartidasRevision } from '@/components/entradas/PartidasRevision'
 import { AjusteDevModal } from '@/components/entradas/AjusteDevModal'
 import { LiberarAvanceModal } from '@/components/entradas/LiberarAvanceModal'
+import { DocumentoImprimibleDialog } from '@/components/imprimibles'
+import { ActaRevisionImprimible } from '@/components/entradas/imprimibles/ActaRevisionImprimible'
+import type { ToolbarAction } from '@/types/shell'
 import {
     columnaAvanceRevision,
     columnaEstadoRevision,
@@ -69,6 +72,38 @@ export function RevisionCatalogo() {
     const [liberarPartida, setLiberarPartida] = useState<string | null>(null)
     /** ⭐ MEJORA 28 — la huella exacta cuando la partida rindió varias marcas. */
     const [liberarGrupo, setLiberarGrupo] = useState<string | null>(null)
+    /**
+     * ⭐ FIX 25 Sep 2026 (usuario) — **el desglose también se refresca**. `PartidasRevision` trae sus
+     * propios datos (`listarPartidasConAvance`) en un `useState` con `useEffect`, así que recargar la
+     * LISTA no lo toca: al liberar, la fila que se abrió seguía mostrando sus «Liberar n» y sus cifras
+     * viejas *«hasta que cierro los detalles y los vuelvo a abrir»*. Este contador entra en las
+     * dependencias del efecto del desglose. Sube al guardar la liberación, el ajuste de la DEV y el
+     * wizard (los tres cambian lo que el desglose pinta).
+     */
+    const [refresco, setRefresco] = useState(0)
+    /**
+     * ⭐ MEJORA 34 (usuario) — **varios detalles pueden estar abiertos** (la tabla lo permite), así que
+     * se guardan **todos** y el botón apunta al **último que se abrió de los que siguen abiertos**. Al
+     * plegar uno se suelta **ese** —y si no queda ninguno, el botón vuelve a gris—.
+     * El defecto medido: al cerrar los detalles la toolbar se quedaba con esa entrada y su botón seguía
+     * activo (*«tengo que abrir otro para que cambie»*).
+     */
+    const [abiertos, setAbiertos] = useState<
+        { entrada: Entrada; partidas: PartidaConAvance[] }[]
+    >([])
+    const [acta, setActa] = useState(false)
+    /** ⚠️ Memoizado: entra en las dependencias del efecto del desglose (si cambiara, re-consultaría). */
+    const alCargarDesglose = useCallback(
+        (idEntrada: string, datos: { entrada: Entrada; partidas: PartidaConAvance[] } | null) => {
+            setAbiertos((prev) => {
+                const otros = prev.filter((d) => d.entrada.id !== idEntrada)
+                return datos ? [...otros, datos] : otros
+            })
+        },
+        []
+    )
+    /** El objetivo de la impresión de la página: el último abierto que **sigue** abierto. */
+    const detalle = abiertos[abiertos.length - 1] ?? null
 
     const puedeEditar = useCanAction(RUTA, 'editar')
 
@@ -207,9 +242,34 @@ export function RevisionCatalogo() {
         [filtros, manejarFiltros, total]
     )
 
+    /**
+     * ⭐ MEJORA 34 (usuario) — **«Imprimir revisión» en la toolbar de la PÁGINA**, y se **activa cuando
+     * los detalles de una entrada están abiertos**: el desglose le presta sus datos (`onDatos`) y
+     * mientras no haya ninguno abierto el botón queda **apagado diciendo por qué** (`title`) — la SPEC
+     * §2.3 prohíbe deshabilitar sin motivo.
+     */
+    const acciones = useMemo<ToolbarAction[]>(
+        () => [
+            {
+                id: 'imprimir-revision',
+                label: 'Imprimir revisión',
+                icon: Printer,
+                accion: 'ver',
+                variant: 'outline',
+                disabled: !detalle,
+                title: detalle
+                    ? `Acta de revisión de ${detalle.entrada.folio}, para firmar.`
+                    : 'Abre los detalles de una entrada para imprimir su acta de revisión.',
+                onClick: () => setActa(true),
+            },
+        ],
+        [detalle]
+    )
+
     usePageConfig({
         info: { title: 'Revisión', subtitle: 'Entradas' },
         path: RUTA,
+        actions: acciones,
         filtros: filtrosBarra,
     })
 
@@ -252,9 +312,14 @@ export function RevisionCatalogo() {
                 // ⭐ MEJORA 24 Sep 2026 (Fase 2) — el desglose ya no es sólo «elegir partida»:
                 // cuenta la evolución (② la píldora «n malas» abre la DEV de ESA partida;
                 // ③ avance con barra; «Ver resultado» cuando la partida cerró).
+                // ⭐ MEJORA 34 (usuario, 27 Sep 2026) — **un detalle a la vez**: la toolbar de la página
+                // imprime «los detalles», y con dos abiertos tendría que elegir. El acordeón lo evita.
+                unaFilaExpandida
                 renderFilaExpandida={(e) => (
                     <PartidasRevision
                         entrada={e}
+                        refresco={refresco}
+                        onDatos={alCargarDesglose}
                         // ⭐ FIX 25 Sep 2026 (30-bis) — ESTA cola se opera con el dedo (el mismo
                         // `modoTactil` que lleva la tabla): sus puertas miden 44, no los 32 del kit.
                         tactil
@@ -291,6 +356,9 @@ export function RevisionCatalogo() {
                 idPartidaFiltro={devPartida}
                 onGuardado={() => {
                     void recargar()
+                    // ⭐ FIX 25 Sep 2026 — el desglose de ESTA entrada se vuelve a consultar: sin
+                    // esto, lo que acaba de cambiar seguía viéndose viejo hasta cerrar el acordeón.
+                    setRefresco((n) => n + 1)
                 }}
             />
             <WizardRevision
@@ -311,6 +379,9 @@ export function RevisionCatalogo() {
                 }}
                 onGuardado={() => {
                     void recargar()
+                    // ⭐ FIX 25 Sep 2026 — el desglose de ESTA entrada se vuelve a consultar: sin
+                    // esto, lo que acaba de cambiar seguía viéndose viejo hasta cerrar el acordeón.
+                    setRefresco((n) => n + 1)
                 }}
             />
             {/* ⭐ MEJORA 25 — la liberación parcial (decisión 22). La entrada NO cambia de estado:
@@ -329,6 +400,9 @@ export function RevisionCatalogo() {
                 idGrupoFiltro={liberarGrupo}
                 onGuardado={() => {
                     void recargar()
+                    // ⭐ FIX 25 Sep 2026 — el desglose de ESTA entrada se vuelve a consultar: sin
+                    // esto, lo que acaba de cambiar seguía viéndose viejo hasta cerrar el acordeón.
+                    setRefresco((n) => n + 1)
                 }}
             />
             <ResultadoRevisionModal
@@ -338,6 +412,18 @@ export function RevisionCatalogo() {
                 }}
                 entrada={resultado}
             />
+            {/* ⭐ MEJORA 34 — el acta que imprime la toolbar de la página. Mismo documento que el de la
+                toolbar de detalles: una sola plantilla, dos puertas. */}
+            <DocumentoImprimibleDialog
+                open={acta}
+                onOpenChange={setActa}
+                titulo={`Acta de revisión · ${detalle?.entrada.folio ?? ''}`}
+                nombreArchivo={`acta-revision-${detalle?.entrada.folio ?? 'entrada'}`}
+            >
+                {detalle ? (
+                    <ActaRevisionImprimible entrada={detalle.entrada} partidas={detalle.partidas} />
+                ) : null}
+            </DocumentoImprimibleDialog>
         </>
     )
 }

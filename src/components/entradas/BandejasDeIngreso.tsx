@@ -34,11 +34,12 @@
 // **Ingreso (folio + de qué está hecho) · En el puesto (tandas y piezas) · Acción del documento**.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import { Pildora } from '@/components/data-table'
+import { BotonDespliegue, CLASE_THEAD_TABLA, Pildora } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
 import { foliosDeBandeja, origenDeBandeja, productoDeBandeja } from '@/components/entradas/columnas-entrada'
 import { cn } from '@/lib/utils'
@@ -204,6 +205,74 @@ interface BandejasDeIngresoProps {
      * compartida no sabe de reglas de negocio ni de permisos — el puesto decide qué botones pone.
      */
     accionesMasivas?: ReactNode
+    /**
+     * ⭐ MEJORA 33 (27 Sep 2026) — **densidad por PUESTO** (L8): `puesto` = la acción de la fila a
+     * 52px (puesto de dedo, comportamiento de siempre) · `kit` = el botón del kit `h-8` (escritorio,
+     * el mismo de `PartidasExpandidas`). La decide quien hospeda, no la pieza.
+     */
+    densidad?: 'puesto' | 'kit'
+    /**
+     * ⭐ MEJORA 33 — agrega la columna **«SKU que la recibe»** (se resuelve en Almacén, decisión 17).
+     * Es el dato que separa «recibí mercancía» de «ingresé a inventario».
+     */
+    sku?: boolean
+    /**
+     * ⭐ MEJORA 33 — pinta una **fila de PARTIDA** sobre sus productos: hace visible que N huellas
+     * (→ N SKU) salieron de **una** partida declarada (la derivación, L4 · decisión 22.j).
+     */
+    agruparPorPartida?: boolean
+}
+
+/** Una fila de la sub-tabla: la de PARTIDA (resumen) o la de un producto (bandeja). */
+interface FilaDesglose {
+    tipo: 'partida' | 'producto'
+    /** Sólo en la fila de partida: el número de partida declarada. */
+    partida: number | null
+    /** Sólo en las filas de producto. */
+    bandeja?: BandejaLiberada
+    /** Σ de piezas de la fila (en la de partida, la de sus productos). */
+    piezas: number
+    /** Grupos de la fila que todavía no tienen SKU. */
+    sinSku: number
+    /** Cuántos productos derivados cuelgan de la partida (sólo en su fila). */
+    productos: number
+    /** Categoría declarada, que sí viaja en la bandeja (`categoria_nombre`). */
+    categoria: string | null
+}
+
+/** Arma las filas del desglose: opcionalmente agrupadas por PARTIDA declarada. */
+function filasDeDesglose(bandejas: BandejaLiberada[], agruparPorPartida: boolean): FilaDesglose[] {
+    const aProducto = (b: BandejaLiberada): FilaDesglose => ({
+        tipo: 'producto',
+        partida: b.partida_numero,
+        bandeja: b,
+        piezas: b.piezas,
+        sinSku: b.id_producto ? 0 : 1,
+        productos: 1,
+        categoria: b.categoria_nombre,
+    })
+
+    if (!agruparPorPartida) return bandejas.map(aProducto)
+
+    const porPartida = new Map<string, BandejaLiberada[]>()
+    for (const b of bandejas) {
+        const k = String(b.partida_numero ?? '—')
+        porPartida.set(k, [...(porPartida.get(k) ?? []), b])
+    }
+
+    const filas: FilaDesglose[] = []
+    for (const lista of porPartida.values()) {
+        filas.push({
+            tipo: 'partida',
+            partida: lista[0].partida_numero,
+            piezas: lista.reduce((s, b) => s + b.piezas, 0),
+            sinSku: lista.filter((b) => !b.id_producto).length,
+            productos: lista.length,
+            categoria: lista[0].categoria_nombre,
+        })
+        for (const b of lista) filas.push(aProducto(b))
+    }
+    return filas
 }
 
 /**
@@ -211,7 +280,21 @@ interface BandejasDeIngresoProps {
  * + estado**, con su acción de 52px (puesto de dedo: el ⋯ obliga a apuntar a 24px y elegir a
  * ciegas, L11).
  */
-export function BandejasDeIngreso({ bandejas, accion, accionesMasivas }: BandejasDeIngresoProps) {
+export function BandejasDeIngreso({
+    bandejas,
+    accion,
+    accionesMasivas,
+    densidad = 'puesto',
+    sku = false,
+    agruparPorPartida = false,
+}: BandejasDeIngresoProps) {
+    // ⭐ MEJORA 33 — el MISMO gesto de la Fase 1 en el SEGUNDO nivel: la fila de PARTIDA se pliega
+    // (`BotonDespliegue` `sm`, kit 0.8) y esconde sus subpartidas. El estado vive aquí porque la
+    // tabla es tonta; el `useState` va ANTES del return temprano (reglas de hooks).
+    const [plegadas, setPlegadas] = useState<Record<string, boolean>>({})
+    const alternarPartida = (clave: string) =>
+        setPlegadas((prev) => ({ ...prev, [clave]: !prev[clave] }))
+
     if (bandejas.length === 0) {
         return (
             <p className="text-[13px] text-muted-foreground">
@@ -221,28 +304,91 @@ export function BandejasDeIngreso({ bandejas, accion, accionesMasivas }: Bandeja
         )
     }
 
+    const filas = filasDeDesglose(bandejas, agruparPorPartida)
+    const esKit = densidad === 'kit'
+
     return (
         <div className="flex flex-col gap-3">
             {accionesMasivas}
             <div className="overflow-hidden rounded-md border border-border bg-surface-raised">
                 <table className="w-full text-[14.5px]">
-                <thead className="border-b border-border bg-surface text-[10px] uppercase tracking-[0.09em] text-muted-foreground">
+                <thead className={CLASE_THEAD_TABLA}>
                     <tr>
                         <th className={cn(TH, 'w-28 text-left')}>Tanda</th>
                         <th className={cn(TH, 'text-left')}>Producto</th>
+                        {sku && <th className={cn(TH, 'w-44 text-left')}>SKU que la recibe</th>}
                         <th className={cn(TH, 'w-20')}>Piezas</th>
                         <th className={cn(TH, 'w-40')}>Estado</th>
-                        <th className={cn(TH, 'w-56')}>
+                        <th className={cn(TH, esKit ? 'w-36' : 'w-56')}>
                             <span className="sr-only">Acción</span>
                         </th>
                     </tr>
                 </thead>
                 <tbody>
-                    {bandejas.map((b) => {
+                    {filas.map((f, idx) => {
+                        // ── Fila de PARTIDA: el resumen de lo que UNA partida declarada rindió (L4) ──
+                        if (f.tipo === 'partida') {
+                            const clave = String(f.partida ?? 'x')
+                            return (
+                                <tr
+                                    key={`partida-${clave}-${idx}`}
+                                    // ⭐ MEJORA 33 — la fila de PARTIDA se distingue por TINTE y por el RIEL
+                                    // de acento de su primera celda (el mismo criterio que la Fase 1).
+                                    className="border-t-2 border-border bg-hover-background"
+                                >
+                                    <td className="px-2.5 py-2 text-center shadow-[inset_3px_0_0_var(--acc-entradas)]">
+                                        <span className="inline-flex items-center gap-1">
+                                            <BotonDespliegue
+                                                abierto={!plegadas[clave]}
+                                                onAlternar={() => alternarPartida(clave)}
+                                                sujeto={`la partida ${f.partida ?? ''}`}
+                                                tamano="sm"
+                                            />
+                                            <span className="whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.09em] text-acc-entradas">
+                                                PARTIDA {f.partida ?? '—'} · {f.productos}{' '}
+                                                {f.productos === 1 ? 'producto' : 'productos'}
+                                            </span>
+                                        </span>
+                                    </td>
+                                    <td className="px-2.5 py-2 text-muted-foreground">
+                                        {f.categoria ?? 'Declarada en recepción'}
+                                    </td>
+                                    {sku && (
+                                        <td className="px-2.5 py-2">
+                                            {f.sinSku > 0 ? (
+                                                <Pildora
+                                                    texto={`${f.sinSku} por resolver`}
+                                                    tono="advertencia"
+                                                />
+                                            ) : (
+                                                <Pildora texto="Resueltos" tono="listo" />
+                                            )}
+                                        </td>
+                                    )}
+                                    <td className="px-2.5 py-2 text-center text-[14px] font-semibold tabular-nums">
+                                        {f.piezas}
+                                    </td>
+                                    <td className="px-2.5 py-2 text-center">
+                                        <Pildora texto="Por cotejar" tono="info" />
+                                    </td>
+                                    <td className="px-2.5 py-2" />
+                                </tr>
+                            )
+                        }
+
+                        // ── Fila de PRODUCTO (la subpartida que produjo la revisión): su huella, sus
+                        //    piezas, su SKU y su acción. Se OCULTA si su partida está plegada. ──
+                        const b = f.bandeja as BandejaLiberada
+                        if (agruparPorPartida && plegadas[String(f.partida ?? 'x')]) return null
                         const a = accion(b)
                         return (
                             <tr key={b.clave} className="border-t border-border/70">
-                                <td className="px-2.5 py-2 font-mono text-[13px] tabular-nums">
+                                <td
+                                    className={cn(
+                                        'px-2.5 py-2 font-mono text-[13px] tabular-nums',
+                                        agruparPorPartida && 'pl-6'
+                                    )}
+                                >
                                     <b>{foliosDeBandeja(b)}</b>
                                 </td>
                                 <td className="px-2.5 py-2">
@@ -255,6 +401,15 @@ export function BandejasDeIngreso({ bandejas, accion, accionesMasivas }: Bandeja
                                         </span>
                                     </span>
                                 </td>
+                                {sku && (
+                                    <td className="px-2.5 py-2">
+                                        {b.id_producto ? (
+                                            <Pildora texto={b.producto_sku ?? 'Resuelto'} tono="listo" />
+                                        ) : (
+                                            <Pildora texto="Por resolver" tono="advertencia" />
+                                        )}
+                                    </td>
+                                )}
                                 <td className="px-2.5 py-2 text-center text-[16px] font-bold tabular-nums">
                                     {b.piezas}
                                 </td>
@@ -265,15 +420,21 @@ export function BandejasDeIngreso({ bandejas, accion, accionesMasivas }: Bandeja
                                     />
                                 </td>
                                 <td className="px-2.5 py-2">
+                                    {/* Densidad por PUESTO (L8): el escritorio usa el botón del kit
+                                        (`h-8`, como `PartidasExpandidas`); el puesto de dedo conserva
+                                        la acción de 52px con etiqueta. */}
                                     <Button
                                         type="button"
                                         variant={a.dominante ? 'default' : 'outline'}
-                                        className="min-h-[52px] w-full"
+                                        size={esKit ? 'sm' : 'default'}
+                                        className={esKit ? undefined : 'min-h-[52px] w-full'}
                                         disabled={a.disabled}
                                         title={a.title}
                                         onClick={a.onClick}
                                     >
-                                        <a.icono className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                                        {!esKit && (
+                                            <a.icono className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                                        )}
                                         {a.etiqueta}
                                     </Button>
                                 </td>

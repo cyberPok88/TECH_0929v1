@@ -4,42 +4,72 @@
 // NOTA DE ENTRADA IMPRIMIBLE — documento físico (Guía 1.6 · MEJORA 20 Sep 2026)
 // Espejo de la plantilla V5 `notaEntradaHtml(d, negocio)`: folio · fecha · proveedor ·
 // capturó · notas · tabla (clasificación/cantidad/costo/total) · total · firmas.
-// Presentacional: no llama Server Actions; recibe `entrada` + `partidas` ya resueltas.
+//
+// ⭐ MEJORA 27 Sep 2026 — ES EL RESPALDO EN CÓDIGO DEL CARRIL DE PLANTILLAS.
+// `DocumentoImprimible` lo pinta cuando el tipo `nota_entrada` NO tiene plantilla
+// activa en la BD; si el usuario activa la suya, se imprime la plantilla. Por eso
+// recibe `datos` con el MISMO vocabulario que la plantilla (lo arma
+// `datos-nota-entrada.ts`): los dos caminos imprimen lo mismo.
+//
+// ⭐ ENCABEZA LA MARCA, NO LA RAZÓN SOCIAL. El papel de operación lo firma la marca
+// visible —TENOCHTITLÁN · IMPERIO TECNOLÓGICO—; la razón social (TECH COMPUTER) es
+// de los documentos fiscales. Ver `DOCS/EMPRESA/03_MARCA.md` §1 «Arquitectura de
+// marca»: TECH COMPUTER = matriz/facturación · TENOCHTITLÁN = marca visible al
+// público. Por eso imprime `nombre_comercial`; `razon_social` es el último recurso,
+// para no dejar el encabezado vacío.
+//
+// ⭐ YA NO FORMATEA NI CALCULA. Los importes y la fecha llegan formateados en `datos`:
+// el motor de plantillas tampoco formatea, y dos caminos que formatean distinto se
+// desincronizan. Y ya no lleva el membrete hardcodeado («TENOCHTITLÁN — IMPERIO
+// TECNOLÓGICO»): sale de `empresa_emisora` y viaja dentro de `datos`.
+//
+// Presentacional: no llama Server Actions; recibe todo resuelto.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { Entrada, PartidaEntrada } from '@/types/entradas'
-
-function formatearMXN(monto: number): string {
-    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(monto)
-}
-
-function formatearFecha(fecha: string): string {
-    const d = new Date(fecha)
-    if (Number.isNaN(d.getTime())) return fecha
-    return d.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
+import type { VariablesDocumento } from '@/lib/plantillas/motor'
 
 interface NotaEntradaImprimibleProps {
-    entrada: Entrada
-    partidas: PartidaEntrada[]
+    /** El vocabulario del papel, ya formateado (`datos-nota-entrada.ts` + membrete). */
+    datos: VariablesDocumento
 }
 
-export function NotaEntradaImprimible({ entrada, partidas }: NotaEntradaImprimibleProps) {
-    const total = partidas.reduce((s, p) => s + p.cantidad_original * p.costo_acordado, 0)
+/** Un valor del vocabulario como texto. Acá tampoco se calcula: la plantilla pinta. */
+function texto(valor: unknown): string {
+    if (valor === null || valor === undefined) return ''
+    return String(valor)
+}
+
+export function NotaEntradaImprimible({ datos }: NotaEntradaImprimibleProps) {
+    const partidas = Array.isArray(datos.partidas) ? datos.partidas : []
+    const logo = texto(datos.logo_url)
 
     return (
         <div className="text-sm text-black">
-            <div className="text-center text-lg font-bold">TENOCHTITLÁN — IMPERIO TECNOLÓGICO</div>
+            {/* El membrete sale de `empresa_emisora` (P7 de la Guía 2.1). Un logo vacío
+                NO se pinta: `<img src="">` apunta a la propia página y la recarga. */}
+            {logo ? (
+                // ⚠️ `<img>` a propósito, no `next/image`: es un elemento del PAPEL, que
+                //    html2canvas rasteriza. El optimizador exige `height` —que distorsionaría
+                //    un logo de proporción desconocida— y una allowlist de dominios en
+                //    `next.config`; el logo lo elige el usuario y puede venir de cualquier host.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logo} alt={texto(datos.nombre_comercial)} width={140} className="mb-1" />
+            ) : null}
+            <div className="text-center text-lg font-bold">
+                {texto(datos.nombre_comercial) || texto(datos.razon_social)}
+            </div>
             <div className="text-center text-sm font-semibold">Nota de entrada de mercancía</div>
 
             <div className="mt-3 text-[13px] font-bold">
-                FOLIO: {entrada.folio} &nbsp;&nbsp; FECHA: {formatearFecha(entrada.fecha)}
+                FOLIO: {texto(datos.folio)} &nbsp;&nbsp; FECHA: {texto(datos.fecha)}
             </div>
             <div className="text-[13px] font-bold">
-                PROVEEDOR: {entrada.proveedor_nombre ?? '—'}
-                {entrada.creador_nombre ? ` &nbsp;&nbsp; CAPTURÓ: ${entrada.creador_nombre}` : ''}
+                PROVEEDOR: {texto(datos.proveedor) || '—'}
+                {texto(datos.capturo) ? ` &nbsp;&nbsp; CAPTURÓ: ${texto(datos.capturo)}` : ''}
             </div>
-            {entrada.notas ? <div className="text-[13px] font-bold">NOTAS: {entrada.notas}</div> : null}
+            {texto(datos.notas) ? (
+                <div className="text-[13px] font-bold">NOTAS: {texto(datos.notas)}</div>
+            ) : null}
 
             <table className="mt-3 w-full border-collapse">
                 <thead>
@@ -52,18 +82,22 @@ export function NotaEntradaImprimible({ entrada, partidas }: NotaEntradaImprimib
                     </tr>
                 </thead>
                 <tbody>
-                    {partidas.map((p) => (
-                        <tr key={p.id}>
-                            <td className="border border-black px-2 py-1 tabular-nums">{p.partida}</td>
-                            <td className="border border-black px-2 py-1">{p.categoria_nombre ?? '—'}</td>
-                            <td className="border border-black px-2 py-1 text-right tabular-nums">
-                                {p.cantidad_original}
+                    {partidas.map((p, i) => (
+                        <tr key={`${texto(p.partida)}-${i}`}>
+                            <td className="border border-black px-2 py-1 tabular-nums">
+                                {texto(p.partida)}
+                            </td>
+                            <td className="border border-black px-2 py-1">
+                                {texto(p.clasificacion) || '—'}
                             </td>
                             <td className="border border-black px-2 py-1 text-right tabular-nums">
-                                {formatearMXN(p.costo_acordado)}
+                                {texto(p.cantidad)}
                             </td>
                             <td className="border border-black px-2 py-1 text-right tabular-nums">
-                                {formatearMXN(p.cantidad_original * p.costo_acordado)}
+                                {texto(p.costo)}
+                            </td>
+                            <td className="border border-black px-2 py-1 text-right tabular-nums">
+                                {texto(p.total_linea)}
                             </td>
                         </tr>
                     ))}
@@ -72,7 +106,7 @@ export function NotaEntradaImprimible({ entrada, partidas }: NotaEntradaImprimib
                             TOTAL
                         </td>
                         <td className="border border-black px-2 py-1 text-right font-bold tabular-nums">
-                            {formatearMXN(total)}
+                            {texto(datos.total)}
                         </td>
                     </tr>
                 </tbody>

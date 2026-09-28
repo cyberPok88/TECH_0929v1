@@ -323,7 +323,8 @@ export function AcondicionamientoCatalogo() {
                             setChipTanda(c.id)
                         }}
                         className={cn(
-                            'min-h-11 rounded-full border px-3.5 text-[14px] transition-colors',
+                            // ⭐ MEJORA 27 Sep 2026 — `rounded-md`: chip de CONTROL, no píldora de estado.
+                            'min-h-11 rounded-md border px-3.5 text-[14px] transition-colors',
                             chipTanda === c.id
                                 ? 'border-acc-entradas bg-acc-entradas/15 font-semibold'
                                 : 'border-border bg-surface-raised text-muted-foreground hover:bg-hover-background'
@@ -359,6 +360,9 @@ export function AcondicionamientoCatalogo() {
                 estado={estado}
                 emptyMessage="No hay nada por acondicionar en esta vista."
                 modoTactil
+                // ⭐ MEJORA 27 Sep 2026 — el patrón de detalles del módulo es UNO: **un detalle a la
+                // vez** (MEJORA 34/35 en las otras colas). Abrir el ingreso siguiente cierra el anterior.
+                unaFilaExpandida
                 onRetry={() => {
                     void recargar()
                 }}

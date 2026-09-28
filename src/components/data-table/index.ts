@@ -10,6 +10,22 @@ export { Pagination } from "./Pagination"
 export { ColumnSelector } from "./ColumnSelector"
 export { ConfirmDialog } from "./ConfirmDialog"
 
+// ⭐ MEJORA 26 Sep 2026 (contrato agregado) — EL CROMO DE TABLA, EN UN SOLO LUGAR.
+// `BotonDespliegue`: el chevron con marco al hover, el MISMO en la fila de entrada y en la
+// fila de partida. Las `CLASE_*`: la fuente única para que una tabla escrita a mano pinte
+// el encabezado igual que el kit (era el origen de que hubiera tres maneras distintas).
+export { BotonDespliegue } from "./BotonDespliegue"
+export type { BotonDespliegueProps } from "./BotonDespliegue"
+export {
+    CLASE_CAJA_TABLA,
+    CLASE_TABLA,
+    CLASE_THEAD_TABLA,
+    CLASE_TH_TABLA,
+    CLASE_TH_KIT,
+    CLASE_TD_FILA,
+    CLASE_TBODY_KIT,
+} from "./estilos-tabla"
+
 // ⭐ REDISEÑO 02 Sep 2026 — piezas nuevas de la familia (Parte 2 · B5/B6)
 export { crearColumnaAcciones } from "./columnas/crearColumnaAcciones"   // PROMOCIÓN
 export { useSeleccionTabla } from "./hooks/useSeleccionTabla"            // NACE

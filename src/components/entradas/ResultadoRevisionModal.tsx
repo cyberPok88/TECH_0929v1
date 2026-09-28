@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { listarResultadoRevision } from '@/lib/actions/entradas'
 import type { Entrada, ResultadoRevision } from '@/types/entradas'
+import { CLASE_THEAD_TABLA } from '@/components/data-table'
 
 interface ResultadoRevisionModalProps {
     open: boolean
@@ -50,7 +51,7 @@ export function ResultadoRevisionModal({ open, onOpenChange, entrada }: Resultad
                         ) : (
                             <div className="rounded border">
                                 <table className="w-full text-sm">
-                                    <thead className="border-b bg-muted/50 text-center text-muted-foreground">
+                                    <thead className={`${CLASE_THEAD_TABLA} text-center`}>
                                         <tr>
                                             <th className="px-3 py-2">Marca</th>
                                             <th className="px-3 py-2 text-left">Atributos</th>
@@ -85,7 +86,7 @@ export function ResultadoRevisionModal({ open, onOpenChange, entrada }: Resultad
                         ) : (
                             <div className="rounded border">
                                 <table className="w-full text-sm">
-                                    <thead className="border-b bg-muted/50 text-center text-muted-foreground">
+                                    <thead className={`${CLASE_THEAD_TABLA} text-center`}>
                                         <tr>
                                             <th className="px-3 py-2">Motivo</th>
                                             <th className="px-3 py-2">Cant.</th>

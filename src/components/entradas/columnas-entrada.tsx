@@ -162,15 +162,25 @@ export function crearColumnaDevolucion(onVerDev?: (fila: Entrada) => void): Colu
         size: 72,
         render: (_valor, fila) =>
             fila.devolucion_total > 0 ? (
-                // La píldora NO cambia de forma (el usuario la aprobó): se envuelve para volverla botón.
+                // ⭐ MEJORA 27 Sep 2026 (usuario, mockup `pildoras-columnas-vs-botones.html` ⓑ) — LA FORMA
+                // DISTINGUE CONTROL DE ESTADO: la píldora NO cambia de tamaño, de tono ni de contenido
+                // (el usuario la había aprobado) — solo de RADIO: `rounded-md` (el del resto de la UI, que
+                // cambia con la paleta) contra el `rounded-full` de las píldoras de ESTADO, que se quedan
+                // redondas. Antes las CUATRO celdas de la fila eran `rounded-full` y no se sabía cuál se
+                // pulsaba. El envoltorio lleva el mismo radio que la píldora para que el anillo de foco
+                // acompañe la forma.
                 <button
                     type="button"
                     onClick={() => onVerDev?.(fila)}
                     disabled={!onVerDev}
                     title="Ver la devolución: partida, producto, motivo, estado y ajuste."
-                    className="rounded-full transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive disabled:cursor-default disabled:hover:opacity-100"
+                    className="rounded-md transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive disabled:cursor-default disabled:hover:opacity-100"
                 >
-                    <Pildora texto={`−${fila.devolucion_total}`} tono="peligro" />
+                    <Pildora
+                        texto={`−${fila.devolucion_total}`}
+                        tono="peligro"
+                        className="rounded-md"
+                    />
                 </button>
             ) : (
                 <span className="text-muted-foreground">—</span>
@@ -181,7 +191,7 @@ export function crearColumnaDevolucion(onVerDev?: (fila: Entrada) => void): Colu
 /**
  * ⭐ MEJORA 22 Sep 2026 — «Final»: lo que QUEDA después del ajuste (Σ `cantidad_vigente`).
  * ⭐ 3ª pasada (idea del usuario): mientras la DEV está **sin ajustar** la celda no se queda en
- * un aviso — es el **BOTÓN que abre «Ajustar y nota»**, que es justo la acción que resuelve ese
+ * un aviso — es el **BOTÓN que abre «Ajustar + nota»**, que es justo la acción que resuelve ese
  * estado. Con el ajuste hecho muestra el número (en negrita si hubo DEV).
  * Se construye con el callback de la página (patrón `crearColumnaAcciones`).
  */
@@ -203,14 +213,17 @@ export function crearColumnaFinal(onAjustar?: (e: Entrada) => void): ColumnaEntr
                         onClick={() => onAjustar(fila)}
                         title="La DEV no está ajustada: abre el ajuste y genera la nota de compra."
                         className={cn(
-                            'inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5',
+                            // ⭐ MEJORA 27 Sep 2026 — `rounded-md` (no `rounded-full`): control, no estado.
+                            'inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-0.5',
                             'text-[10px] font-medium uppercase tracking-wide text-warning transition-colors',
                             'hover:bg-warning/20',
                             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning'
                         )}
                     >
                         <FileText className="size-3 shrink-0" aria-hidden="true" />
-                        Ajustar y nota
+                        {/* ⭐ MEJORA 27 Sep 2026 (usuario) — «Ajustar + nota»: la etiqueta dice las DOS
+                            cosas que hace y es la MISMA frase en los cinco controles de la acción. */}
+                        Ajustar + nota
                     </button>
                 )
             }
@@ -269,7 +282,9 @@ export function crearColumnaNota(
                         disabled={!onVerNota}
                         title={`Ver la nota de compra ${fila.nota_folio} sin salir de esta página`}
                         className={cn(
-                            'inline-flex items-center gap-1 rounded-full border border-primary/45 bg-primary-bg px-2 py-0.5',
+                            // ⭐ MEJORA 27 Sep 2026 — `rounded-md`: la nota es un CONTROL (abre la ficha),
+                            // no una píldora de estado. Mismo tamaño, mismo tono del primario.
+                            'inline-flex items-center gap-1 rounded-md border border-primary/45 bg-primary-bg px-2 py-0.5',
                             'font-mono text-[10px] text-primary transition-colors',
                             'hover:bg-primary/20',
                             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
@@ -294,7 +309,8 @@ export function crearColumnaNota(
                                 : 'Generar la nota de compra (esta entrada no tuvo devoluciones)'
                         }
                         className={cn(
-                            'inline-flex items-center gap-1 rounded-full border border-info/35 bg-info/10 px-2 py-0.5',
+                            // ⭐ MEJORA 27 Sep 2026 — `rounded-md`: «Crear» es una ACCIÓN (genera la nota).
+                            'inline-flex items-center gap-1 rounded-md border border-info/35 bg-info/10 px-2 py-0.5',
                             'font-mono text-[10px] uppercase tracking-wide text-info transition-colors',
                             'hover:bg-info/20',
                             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info'

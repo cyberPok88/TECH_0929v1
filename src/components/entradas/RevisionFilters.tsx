@@ -87,7 +87,12 @@ export const FILTROS_REVISION_DEFAULT: FiltrosEntradas = {
     estado: '',
     estados: [],
     antiguedad_min: 0,
-    orden: 'cola',
+    // ⭐ MEJORA 34 (usuario, 27 Sep 2026) — **por FECHA, el último arriba**. El default era
+    // `orden: 'cola'` (arriba lo que le falta a la etapa y lo cerrado al final, decisión del 25 Sep);
+    // el usuario prefiere el orden cronológico: *«acomodar siempre por fecha mejor, el ultimo
+    // arriba»*. `'cola'` sigue implementado en la Server Action (`fecha_fin_rev` nula primero,
+    // `nullsFirst`) por si se quiere volver a atarlo a una vista.
+    orden: 'recientes',
     fecha_desde: '',
     fecha_hasta: '',
 }

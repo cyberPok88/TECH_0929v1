@@ -7,6 +7,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { cn } from "@/lib/utils"
+import { CLASE_TD_FILA, CLASE_TH_KIT } from "./estilos-tabla"
 
 interface TableSkeletonProps {
     /** Número de filas skeleton a mostrar (default: 5) */
@@ -25,17 +26,16 @@ export function TableSkeleton({
     return (
         <div className={cn("overflow-x-auto", className)}>
             <table className="w-full caption-bottom text-sm" role="table">
-                <thead className="[&_tr]:border-b border-border">
-                    <tr className="border-b border-border">
+                {/* ⭐ MEJORA 26 Sep 2026 — el esqueleto usa las MISMAS clases que la tabla
+                    real (`estilos-tabla`): banda `bg-th` + regla de 2px + versalitas. Si el
+                    encabezado fantasma no coincidiera, al llegar los datos la tabla daría un
+                    salto de tono y de alto — justo lo que un esqueleto viene a evitar. */}
+                <thead>
+                    <tr>
                         {Array.from({ length: columns }).map((_, colIdx) => (
                             <th
                                 key={`col-${colIdx}`}
-                                className={cn(
-                                    "h-12 px-3 text-left align-middle",
-                                    "font-medium text-muted-foreground",
-                                    "[&:has([role=checkbox])]:pr-0",
-                                    "dark:bg-surface-2"
-                                )}
+                                className={cn(CLASE_TH_KIT, "h-12 px-3 text-left")}
                             >
                                 <div
                                     // ⭐ FIX 22 Sep 2026 — `mx-auto`: las barras fantasma son
@@ -55,7 +55,6 @@ export function TableSkeleton({
                         <tr
                             key={`row-${rowIdx}`}
                             className={cn(
-                                "border-b border-border",
                                 "transition-colors hover:bg-hover-background",
                                 "data-[state=selected]:bg-primary-bg/50"
                             )}
@@ -65,6 +64,7 @@ export function TableSkeleton({
                                 <td
                                     key={`cell-${rowIdx}-${colIdx}`}
                                     className={cn(
+                                        CLASE_TD_FILA,
                                         "p-3 align-middle",
                                         "[&:has([role=checkbox])]:pr-0",
                                         "first:pl-4 last:pr-4"

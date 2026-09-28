@@ -46,7 +46,9 @@ function formatearMXN(monto: number): string {
 /** Las clases de un chip de opción (44px — objetivo de dedo). */
 function claseChip(activo: boolean, disabled: boolean): string {
     return cn(
-        'inline-flex min-h-11 items-center rounded-full border px-3.5 text-[14px] transition-colors',
+        // ⭐ MEJORA 27 Sep 2026 — `rounded-md`: un chip de opciones es un CONTROL, no una píldora de
+        // estado (la ley del módulo: control = `rounded-md` · estado = `rounded-full`).
+        'inline-flex min-h-11 items-center rounded-md border px-3.5 text-[14px] transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
         activo
             ? 'border-primary bg-primary-bg font-semibold text-primary'

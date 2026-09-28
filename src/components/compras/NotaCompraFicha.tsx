@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // NOTA COMPRA FICHA — Detalle de la nota (Guía 1.4 · rediseño · página [id])
 // Encabezado (píldoras mercancía/pago · origen) + PARTIDAS + HISTORIAL DE PAGOS +
-// acciones (Editar por recibir sin pagos · Registrar pago · Cancelar nota).
+// acciones (Imprimir nota · Editar por recibir sin pagos · Registrar pago · Cancelar nota).
 // Puente disabled "Entrada ligada (1.6)" — la nota NO mueve inventario por sí misma.
 //
 // ⭐ MEJORA 22 Sep 2026 — `enModal`: la MISMA ficha se muestra dentro de un diálogo
@@ -15,12 +15,17 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Pencil, Banknote, Ban, Truck } from 'lucide-react'
+import { ArrowLeft, Pencil, Banknote, Ban, Truck, Printer } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Pildora } from '@/components/data-table'
+import { CLASE_THEAD_TABLA, Pildora } from '@/components/data-table'
 import { useCanAction } from '@/hooks/useCanAction'
 import { obtenerNotaCompra } from '@/lib/actions/notas-compra'
+// ⭐ MEJORA 28 Sep 2026 — la nota ya se IMPRIME con su plantilla (Guía 2.1): el tipo
+// `nota_compra` es familia `valor` y audita su reimpresión, así que el botón solo abre
+// el documento; quién pinta y quién audita vive en el kit `imprimibles/`.
+import { DocumentoImprimible } from '@/components/imprimibles'
+import type { VariablesDocumento } from '@/lib/plantillas/motor'
 import { NotaCompraModal } from '@/components/compras/NotaCompraModal'
 import { RegistrarPagoNotaDialog } from '@/components/compras/RegistrarPagoNotaDialog'
 import { CancelarNotaCompraDialog } from '@/components/compras/CancelarNotaCompraDialog'
@@ -72,6 +77,7 @@ export function NotaCompraFicha({
     const [errorCarga, setErrorCarga] = useState<string | null>(null)
     const [modalEditar, setModalEditar] = useState(false)
     const [dialogo, setDialogo] = useState<{ tipo: 'pago' | 'cancelar' } | null>(null)
+    const [imprimiendo, setImprimiendo] = useState(false)
 
     const puedeEditar = useCanAction(RUTA, 'editar')
     const puedeEliminar = useCanAction(RUTA, 'eliminar')
@@ -132,6 +138,52 @@ export function NotaCompraFicha({
     const pagable = !esCancelada && nota.saldo_pendiente > 0
     const cancelable = !esCancelada && nota.estado_fisico === 'por_recibir' && nota.saldo_pendiente === nota.total
 
+    // ⭐ Los datos del PAPEL. La plantilla PINTA, no calcula (L6): el total, el pagado y el
+    // sello llegan ya resueltos y formateados desde aquí, que es donde está la nota.
+    // ⚠️ El membrete NO viaja: el kit lo resuelve solo desde `empresa_emisora` (P7).
+    // ⚠️ Los nombres son contrato con la plantilla activa de `nota_compra`, no con esta pantalla.
+    const datosImpresion: VariablesDocumento = {
+        folio: nota.folio,
+        fecha: formatearFecha(nota.fecha_nota),
+        estado_fisico: TEXTO_ESTADO_FISICO[nota.estado_fisico],
+        // ⚠️ Cancelada GANA sobre el estado de pago crudo: la nota cancelada no «debe» nada,
+        //    y el papel no puede decir «Por pagar» de algo que ya no se va a pagar (misma
+        //    regla que la ficha, donde el estado y el pago se pintan como Cancelada / —).
+        estado_pago: esCancelada
+            ? 'Cancelada'
+            : nota.estado_pago_clave
+              ? TEXTO_ESTADO_PAGO_NOTA[nota.estado_pago_clave]
+              : (nota.estado_pago_nombre ?? ''),
+        origen: TEXTO_ORIGEN_NOTA[nota.origen],
+        proveedor_nombre: nota.proveedor_nombre ?? '',
+        proveedor_codigo: nota.proveedor_codigo ?? '',
+        // Vacíos = la plantilla OMITE el bloque; no se pinta «—» en el papel.
+        factura: nota.numero_factura_proveedor ?? '',
+        referencia: nota.referencia_proveedor ?? '',
+        // El sello lo decide quien imprime: Pagada · Cancelada · ninguno.
+        sello: esCancelada ? 'Cancelada' : nota.estado_pago_clave === 'pagada' ? 'Pagada' : '',
+        total: formatearMXN(nota.total),
+        /** Pagado = lo que la nota ya no debe. Se deriva del saldo para no sumar dos veces. */
+        pagado: formatearMXN(Number((nota.total - nota.saldo_pendiente).toFixed(2))),
+        saldo: formatearMXN(nota.saldo_pendiente),
+        notas: nota.notas ?? '',
+        motivo_cancelacion: nota.motivo_cancelacion ?? '',
+        partidas: nota.partidas.map((p, i) => ({
+            num: i + 1,
+            descripcion: p.producto_nombre ?? p.descripcion ?? '—',
+            codigo: p.producto_codigo ?? '',
+            cantidad: p.cantidad,
+            costo: formatearMXN(p.costo_acordado),
+            importe: formatearMXN(p.subtotal_partida),
+        })),
+        pagos: nota.pagos.map((p) => ({
+            fecha: formatearFecha(p.fecha_pago),
+            monto: formatearMXN(p.monto),
+            metodo: TEXTO_METODO_PAGO[p.metodo],
+            referencia: p.referencia_bancaria ?? '',
+        })),
+    }
+
     return (
         <div className="flex flex-col gap-5">
             {!enModal && (
@@ -153,6 +205,12 @@ export function NotaCompraFicha({
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                    {/* Imprimir es LEER: no lleva permiso de edición, y el papel lleva este
+                        mismo dato aunque nadie pueda modificar la nota. */}
+                    <Button type="button" variant="outline" size="sm" onClick={() => setImprimiendo(true)}>
+                        <Printer className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                        Imprimir nota
+                    </Button>
                     {puedeEditar && editable && (
                         <Button type="button" variant="outline" size="sm" onClick={() => setModalEditar(true)}>
                             <Pencil className="mr-1.5 h-4 w-4" aria-hidden="true" />
@@ -252,7 +310,7 @@ export function NotaCompraFicha({
                 <h2 className="mb-2 text-sm font-semibold uppercase text-muted-foreground">Partidas</h2>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                        <thead>
+                        <thead className={CLASE_THEAD_TABLA}>
                             <tr className="border-b border-border text-center text-xs text-muted-foreground">
                                 <th className="py-1.5 pr-3 font-medium">Producto</th>
                                 <th className="py-1.5 pr-3 text-center font-medium">Cantidad</th>
@@ -295,7 +353,7 @@ export function NotaCompraFicha({
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
-                            <thead>
+                            <thead className={CLASE_THEAD_TABLA}>
                                 <tr className="border-b border-border text-center text-xs text-muted-foreground">
                                     <th className="py-1.5 pr-3 font-medium">Fecha</th>
                                     <th className="py-1.5 pr-3 text-center font-medium">Monto</th>
@@ -327,6 +385,16 @@ export function NotaCompraFicha({
                 </section>
             )}
 
+            {/* El documento: se resuelve al ABRIR (plantilla activa + membrete) y el PDF se
+                captura sobre el nodo del papel. Aquí no hay nada que cargar de antemano. */}
+            <DocumentoImprimible
+                tipo="nota_compra"
+                datos={datosImpresion}
+                nombreArchivo={nota.folio}
+                titulo={`Nota de compra ${nota.folio}`}
+                open={imprimiendo}
+                onOpenChange={setImprimiendo}
+            />
             <NotaCompraModal
                 open={modalEditar}
                 onOpenChange={setModalEditar}

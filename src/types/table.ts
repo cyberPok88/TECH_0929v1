@@ -272,6 +272,13 @@ export interface DataTableProps<TData = unknown> {
      *  1.4 Notas de compra (futuro) · 1.8 Ventas (futuro). */
     renderFilaExpandida?: (row: TData) => React.ReactNode
 
+    /** ⭐ MEJORA 34 (usuario, 27 Sep 2026) — **un detalle a la vez**: con esto los detalles se
+     *  comportan como un **acordeón** (abrir uno cierra el anterior), de modo que «los detalles»
+     *  sea SIEMPRE uno. Lo pidió el usuario para que la toolbar de la página no tenga que decidir
+     *  cuál de los detalles abiertos es el que se imprime. Default `false`: la tabla sigue
+     *  permitiendo varias filas expandidas, que es el comportamiento de siempre. */
+    unaFilaExpandida?: boolean
+
     /** ⭐ MEJORA 20 Sep 2026 (usuario) — alineación por defecto de los DATOS de la tabla.
      *  Default `'centro'`: el usuario pidió centrar los datos en todas las tablas
      *  (sus encabezados ya salían centrados por el default del navegador y los datos

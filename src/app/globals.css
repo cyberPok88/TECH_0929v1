@@ -14,6 +14,11 @@
     --surface-raised: 0.28 0.012 70;
     --surface-overlay: 0.30 0.012 70;
     --hover-bg: 0.24 0.010 70;
+    /* ⭐ MEJORA 26 Sep 2026 — FONDO DEL ENCABEZADO DE TABLA. Token propio y no
+       `--surface-2`: el encabezado es CROMO, no contenido, y cada paleta necesita
+       elegir su dirección. En las oscuras el cromo se levanta (más claro); en la
+       clara NO SE PUEDE subir —ya es blanco— así que BAJA. Ver la nota de Piedra. */
+    --th-bg: 0.255 0.012 70;
 
     --sidebar: 0.155 0.008 70;
     --sidebar-foreground: 0.94 0.008 85;
@@ -67,6 +72,7 @@
     --surface-raised: 0.29 0.026 212;
     --surface-overlay: 0.31 0.026 212;
     --hover-bg: 0.25 0.024 212;
+    --th-bg: 0.265 0.026 212;   /* = surface-2: el tema oscuro no cambia */
 
     --sidebar: 0.165 0.020 212;
     --sidebar-foreground: 0.94 0.008 200;
@@ -118,6 +124,14 @@
     --surface-raised: 1.0 0.003 95;
     --surface-overlay: 1.0 0.002 95;
     --hover-bg: 0.94 0.010 85;
+    /* ⚠️ AQUÍ ESTABA EL DEFECTO. En este tema `--surface-2` (0.995) y `--surface`
+       (0.985) están a UN punto de luminosidad: en sRGB redondean al MISMO píxel, y
+       medido sobre una captura real el encabezado y la fila salían los dos en
+       `#fefdfa`. La escalera clara (0.985 → 1.0) es 4.3× más plana que la oscura
+       (0.215 → 0.28) y NO se puede arreglar subiendo: no hay nada más claro que el
+       blanco. Así que el cromo BAJA a 0.945 — el mismo escalón de 4 puntos que ya
+       tienen Obsidiana y Turquesa, en la otra dirección. */
+    --th-bg: 0.945 0.012 85;
 
     --sidebar: 0.975 0.010 88;
     --sidebar-foreground: 0.26 0.015 60;

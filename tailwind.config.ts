@@ -34,6 +34,9 @@ const config: Config = {
   			'surface-2': 'oklch(var(--surface-2) / <alpha-value>)',
   			'surface-raised': 'oklch(var(--surface-raised) / <alpha-value>)',
   			'surface-overlay': 'oklch(var(--surface-overlay) / <alpha-value>)',
+  			// ⭐ MEJORA 26 Sep 2026 — cromo del ENCABEZADO DE TABLA. Token propio porque
+  			// cada paleta elige su dirección: en las oscuras sube, en la clara baja.
+  			th: 'oklch(var(--th-bg) / <alpha-value>)',
   			'hover-background': 'oklch(var(--hover-bg) / <alpha-value>)',
   			sidebar: 'oklch(var(--sidebar) / <alpha-value>)',
   			'sidebar-foreground': 'oklch(var(--sidebar-foreground) / <alpha-value>)',

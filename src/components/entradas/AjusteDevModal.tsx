@@ -29,7 +29,7 @@ import { toast } from 'sonner'
 import { ArrowLeft, FileText } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Pildora } from '@/components/data-table'
+import { CLASE_THEAD_TABLA, Pildora } from '@/components/data-table'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
 import { NotaCompraDetalleModal } from '@/components/compras/NotaCompraDetalleModal'
@@ -118,7 +118,7 @@ export function AjusteDevModal({
     /**
      * ⭐ FIX 24 Sep 2026 (usuario) — `revisada_sin_dev` significa **revisada SIN devoluciones**:
      * aquí no hay nada que ajustar, solo se genera la nota. El título, el resumen y la etiqueta del
-     * botón lo dicen; con `con_dev` (sí hubo rechazos) se conserva «Ajustar y generar nota».
+     * botón lo dicen; con `con_dev` (sí hubo rechazos) se conserva «Ajustar + nota».
      */
     const soloGenerarNota = entrada?.estado === 'revisada_sin_dev'
     const puedeAjustar = !notaId && enPasoDeAjuste && aprobadasTodas.length > 0
@@ -244,7 +244,7 @@ export function AjusteDevModal({
                                 // distinguía de él: *«no se distingue la tabla del fondo»*.
                                 <div className="overflow-hidden rounded-md border border-border bg-surface shadow-premium-sm">
                                     <table className="w-full text-xs">
-                                        <thead className="border-b border-border bg-surface-2 text-muted-foreground">
+                                        <thead className={CLASE_THEAD_TABLA}>
                                             <tr>
                                                 <th className="px-3 py-2 text-left font-medium">Partida</th>
                                                 <th className="px-3 py-2 text-left font-medium">Producto (huella declarada)</th>
@@ -390,7 +390,7 @@ export function AjusteDevModal({
                                     ? 'Generando…'
                                     : soloGenerarNota
                                       ? 'Generar nota'
-                                      : 'Ajustar y generar nota'}
+                                      : 'Ajustar + nota'}
                             </Button>
                         )}
                     </DialogFooter>

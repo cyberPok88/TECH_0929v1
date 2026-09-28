@@ -32,7 +32,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PackageOpen } from 'lucide-react'
 
-import { DataTable } from '@/components/data-table'
+import { DataTable, Pildora } from '@/components/data-table'
 import type { EstadoTabla } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
 import { usePageConfig } from '@/hooks/usePageConfig'
@@ -41,11 +41,11 @@ import { listarBandejas, listarEntradas } from '@/lib/actions/entradas'
 import type { BandejaLiberada, Entrada, EstadoEntrada, EstadoTanda } from '@/types/entradas'
 import { FILTROS_ENTRADAS_DEFAULT } from '@/components/entradas/RecepcionFilters'
 import { CotejoAltaModal } from '@/components/entradas/alta/CotejoAltaModal'
+import { diasEnCola, textoAntiguedad, urgenciaDeCola } from '@/components/entradas/columnas-entrada'
 import {
     BandejasDeIngreso,
     agruparPorIngreso,
-    columnaIngresoIdentidad,
-    columnaIngresoResumen,
+    totalesDeIngreso,
     type AccionBandeja,
     type ColumnaIngreso,
     type IngresoEnCola,
@@ -68,6 +68,125 @@ const ESTADOS_DOCUMENTO: EstadoEntrada[] = ['en_almacen']
  * `listarBandejas`: con cientos de ingresos abiertos el corte escondería los más viejos.
  */
 const TAMANO_DOCUMENTOS = 100
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⭐ MEJORA 33 (27 Sep 2026 · usuario) — LA TABLA DEL PADRE, EN LA ANATOMÍA DEL FLUJO.
+//
+// El usuario: *«la tabla de entradas por cotejar es una versión anterior; me gustaría usar la que
+// usamos en la fase de entradas, donde la tabla está bien acomodada, y los detalles muestran la
+// tabla de detalles bien ordenada. Esta etapa ya es para ingresar a almacén.»*
+//
+// Antes el padre tenía **3 columnas con todo apilado** (`Ingreso` = folio + micro-línea ·
+// `En el puesto` = una píldora · `Acción`). Ese apilado ya se había **revertido en Recepción**
+// (24 Sep: *«todo junto folio/fecha/botón se ve muy mal… se ve mucho más amontonado»*).
+// Ahora: **una columna por dato**, como `RecepcionCatalogo`, con la vara de ESTA etapa (L6):
+//   · `Productos`     = las BANDEJAS del puesto (huellas a resolver) — no las partidas declaradas.
+//   · `POR COTEJAR`   = piezas que faltan por ingresar al stock.
+//   · `SKU`           = cuántos productos esperan SKU: es lo que separa «recibí» de «ingresé».
+// La densidad es de **ESCRITORIO** (sin `modoTactil`): el puesto de dedo es Revisión.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Cuántos productos del ingreso esperan SKU (grupos sin `id_producto`). */
+function skusPorResolver(bandejas: BandejaLiberada[]): number {
+    return new Set(bandejas.filter((b) => !b.id_producto).map((b) => b.id_partida_resuelta)).size
+}
+
+/** Antigüedad del ingreso en el puesto: la de su tanda más vieja (la que manda el tono, L1). */
+function diasDeIngreso(bandejas: BandejaLiberada[]): number {
+    if (bandejas.length === 0) return 0
+    const masVieja = bandejas.reduce((a, b) =>
+        a.fecha_primera_liberacion <= b.fecha_primera_liberacion ? a : b
+    )
+    return diasEnCola(masVieja.fecha_primera_liberacion)
+}
+
+/** Identidad del ingreso: SOLO el folio (la celda de identidad no apila metadatos). */
+const columnaFolioCotejo: ColumnaIngreso = {
+    accessorKey: 'folio',
+    label: 'Folio',
+    movil: 'critica',
+    size: 150,
+    render: (valor) => (
+        <span className="font-mono text-[15px] tabular-nums">{String(valor ?? '')}</span>
+    ),
+}
+
+const columnaProveedorCotejo: ColumnaIngreso = {
+    accessorKey: 'proveedor_nombre',
+    label: 'Proveedor',
+    movil: 'secundaria',
+    render: (_v, i) => <span className="block truncate">{i.proveedor_nombre ?? '—'}</span>,
+}
+
+/** Las bandejas del puesto: la vara de la etapa (L6), no el conteo de partidas declaradas. */
+const columnaProductosCotejo: ColumnaIngreso = {
+    id: 'productos',
+    accessorFn: (i) => i.bandejas.length,
+    label: 'Productos',
+    align: 'derecha',
+    movil: 'secundaria',
+    size: 104,
+    render: (_v, i) => <span className="tabular-nums">{i.bandejas.length}</span>,
+}
+
+/** Lo que falta por ingresar al stock. */
+const columnaPorCotejarCotejo: ColumnaIngreso = {
+    id: 'por_cotejar',
+    accessorFn: (i) => totalesDeIngreso(i.bandejas).piezas,
+    label: 'POR COTEJAR',
+    align: 'derecha',
+    movil: 'critica',
+    size: 130,
+    render: (_v, i) => {
+        const piezas = totalesDeIngreso(i.bandejas).piezas
+        if (piezas === 0) return <span className="text-muted-foreground">—</span>
+        return <span className="text-[16px] font-bold tabular-nums">{piezas}</span>
+    },
+}
+
+/** Los SKU que hay que resolver para poder dar el alta. */
+const columnaSkuCotejo: ColumnaIngreso = {
+    id: 'sku',
+    accessorFn: (i) => skusPorResolver(i.bandejas),
+    label: 'SKU',
+    align: 'derecha',
+    movil: 'critica',
+    size: 140,
+    render: (_v, i) => {
+        if (i.bandejas.length === 0) return <span className="text-muted-foreground">—</span>
+        const n = skusPorResolver(i.bandejas)
+        if (n === 0) return <Pildora texto="Resueltos" tono="listo" />
+        return (
+            <span className="text-[14px] font-semibold tabular-nums text-warning">
+                {n} por resolver
+            </span>
+        )
+    },
+}
+
+/** El estado en el idioma de la ETAPA (L1): «Por cotejar», con la antigüedad mandando el tono. */
+const columnaEstadoCotejo: ColumnaIngreso = {
+    id: 'estado',
+    accessorFn: (i) => (i.bandejas.length > 0 ? 'cotejar' : 'cerrar'),
+    label: 'Estado',
+    align: 'centro',
+    movil: 'critica',
+    size: 200,
+    render: (_v, i) => {
+        if (i.bandejas.length === 0) {
+            return <Pildora texto="Listo para cerrar" tono="info" />
+        }
+        const dias = diasDeIngreso(i.bandejas)
+        const { tono, pulsa } = urgenciaDeCola(dias)
+        return (
+            <Pildora
+                texto={`Por cotejar · ${textoAntiguedad(dias)}`}
+                tono={tono}
+                className={pulsa ? 'animate-pulse' : undefined}
+            />
+        )
+    },
+}
 
 export function AltaCatalogo() {
     const [bandejas, setBandejas] = useState<BandejaLiberada[]>([])
@@ -170,26 +289,43 @@ export function AltaCatalogo() {
         [puedeAprobar]
     )
 
-    // ── Padre: el cotejo del SALDO del documento (lo que no salió por tandas). ────────────────
-    const columnaAccionDocumento = useMemo<ColumnaIngreso>(
+    // ── Padre: la puerta del ingreso. Con mercancía en el puesto abre su cotejo; sin bandejas,
+    //    coteja el SALDO del documento (lo que no salió por tandas, R27). Densidad de escritorio:
+    //    el botón del kit (`size="sm"` = h-8), no el de 52px del puesto de dedo. ─────────────────
+    const columnaAccionCotejo = useMemo<ColumnaIngreso>(
         () => ({
             id: 'accion',
             label: 'Acción',
             align: 'centro',
             movil: 'critica',
-            size: 240,
+            size: 200,
             render: (_v, i) => {
+                if (!puedeAprobar) return null
+                if (i.bandejas.length > 0) {
+                    // La más antigua primero (el orden de la cola lo manda su antigüedad, L1).
+                    const primera = i.bandejas.reduce((a, b) =>
+                        a.fecha_primera_liberacion <= b.fecha_primera_liberacion ? a : b
+                    )
+                    return (
+                        <Button
+                            type="button"
+                            size="sm"
+                            title="Abre el cotejo de la tanda que más espera; las demás están al desplegar el ingreso."
+                            onClick={() => setBandejaSel(primera)}
+                        >
+                            Cotejar
+                        </Button>
+                    )
+                }
                 const e = i.entrada
-                // `confirmada` ya cerró: el padre sólo informa, no ofrece acción.
-                if (!e || e.estado !== 'en_almacen' || !puedeAprobar) return null
+                if (!e || e.estado !== 'en_almacen') return null
                 return (
                     <Button
                         type="button"
+                        size="sm"
                         variant="outline"
-                        className="min-h-[52px] w-full"
                         onClick={() => setSeleccion(e)}
                     >
-                        <PackageOpen className="mr-1.5 h-4 w-4" aria-hidden="true" />
                         Cotejar el saldo
                     </Button>
                 )
@@ -199,8 +335,16 @@ export function AltaCatalogo() {
     )
 
     const columnasIngreso = useMemo<ColumnaIngreso[]>(
-        () => [columnaIngresoIdentidad, columnaIngresoResumen, columnaAccionDocumento],
-        [columnaAccionDocumento]
+        () => [
+            columnaFolioCotejo,
+            columnaProveedorCotejo,
+            columnaProductosCotejo,
+            columnaPorCotejarCotejo,
+            columnaSkuCotejo,
+            columnaEstadoCotejo,
+            columnaAccionCotejo,
+        ],
+        [columnaAccionCotejo]
     )
 
     const filtrosBarra = useMemo(
@@ -229,7 +373,9 @@ export function AltaCatalogo() {
                 rowKey={(i) => i.id_entrada}
                 estado={estado}
                 emptyMessage="No hay nada por cotejar."
-                modoTactil
+                // ⭐ MEJORA 27 Sep 2026 — un detalle a la vez: el patrón de detalles del módulo es
+                // uno solo (MEJORA 34/35 en las otras colas).
+                unaFilaExpandida
                 onRetry={() => {
                     void recargar()
                 }}
@@ -237,7 +383,13 @@ export function AltaCatalogo() {
                 page={1}
                 totalPages={1}
                 renderFilaExpandida={(i) => (
-                    <BandejasDeIngreso bandejas={i.bandejas} accion={accionDeBandeja} />
+                    <BandejasDeIngreso
+                        bandejas={i.bandejas}
+                        accion={accionDeBandeja}
+                        densidad="kit"
+                        sku
+                        agruparPorPartida
+                    />
                 )}
             />
 

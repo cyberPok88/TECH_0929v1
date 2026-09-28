@@ -68,6 +68,15 @@ export const toolbarConfig: Record<string, ToolbarAction[]> = {
     '/dashboard/sistema/configuracion': [
         { id: 'guardar', label: 'Guardar cambios', icon: Pencil, accion: 'editar', variant: 'default' },
     ],
+    // ⭐ Guía 2.1 — PLANTILLAS: la ruta se declara SIN acciones base, y es deliberado.
+    //    El módulo tiene 3 pestañas y CADA UNA inyecta la suya («Nuevo tipo» ·
+    //    «Nueva plantilla» · ninguna). La Toolbar fusiona por `id` y lo inyectado gana,
+    //    pero una acción base se dibujaría TAMBIÉN en la pestaña que no la inyecta
+    //    (Auditoría no inyecta nada) — y sin onClick sería un BOTÓN MUERTO
+    //    (SISTEMA_COMPONENTES §8), el mismo defecto que P3 evitó al no montar una
+    //    pestaña vacía. Se declara igual porque este archivo es el registro: quien
+    //    agregue aquí un «Nuevo» tiene que saber que rompe dos pestañas.
+    '/dashboard/sistema/plantillas': [],
 
     // ── CATÁLOGOS (los que el Flujo 01 consume · D10) ──────────────────────────
     '/dashboard/catalogos/productos': [

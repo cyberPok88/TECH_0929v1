@@ -6,6 +6,7 @@ import { obtenerConteo } from '@/lib/actions/inventario'
 import type { ConteoInventarioDetalle } from '@/types/inventario'
 import { TEXTO_ESTADO_CONTEO } from '@/types/inventario'
 import type { ConteoInventario } from '@/types/inventario'
+import { CLASE_THEAD_TABLA } from '@/components/data-table'
 
 interface ConteoInventarioDetailModalProps {
     conteo: ConteoInventario | null
@@ -62,7 +63,7 @@ export function ConteoInventarioDetailModal({
 
                         <div className="overflow-auto rounded-md border border-border">
                             <table className="w-full text-sm">
-                                <thead className="bg-surface text-center text-xs uppercase text-muted-foreground">
+                                <thead className={`${CLASE_THEAD_TABLA} text-center`}>
                                     <tr>
                                         <th className="px-3 py-2">Producto</th>
                                         <th className="px-3 py-2 text-center">Sistema</th>
