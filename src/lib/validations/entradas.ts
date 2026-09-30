@@ -30,6 +30,11 @@ export const partidaEntradaSchema = z.object({
         .min(1, 'Indica el costo acordado.')
         .refine((v) => COSTO_RE.test(v), 'El costo debe ser numérico (hasta 4 decimales).')
         .refine((v) => Number(v) >= 0, 'El costo no puede ser negativo.'),
+    /**
+     * ⭐ MEJORA 28 Sep 2026 — D1: la bandera la decide **Recepción** (quien recibe la mercancía), no
+     * el técnico. Es la que hace que el guardado de la revisión pida el concentrado de NS.
+     */
+    lleva_ns: z.boolean(),
 })
 
 function refinarEntrada(

@@ -89,7 +89,9 @@ export function EntradasDashboard() {
             {/* ── Strip del flujo ─────────────────────────────────────────── */}
             {/* Alturas duales: 44px táctil en móvil, 32px de escritorio (§11). */}
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface px-3.5 py-2.5">
-                <span className="mr-2 font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted-foreground">
+                {/* ⭐ MEJORA 43 — pase tipográfico (piso L14): la etiqueta de contenido del strip sube
+                    de 9.5px (medida del CROMO de tabla) a la etiqueta canónica de la SPEC §1.2. */}
+                <span className="mr-2 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
                     Flujo
                 </span>
                 {ETAPAS_FLUJO.map((etapa, i) => {
@@ -169,7 +171,9 @@ export function EntradasDashboard() {
                                 <h2 className="truncate font-display text-[13.5px] font-semibold tracking-wide text-foreground transition-colors group-hover:text-primary-fg">
                                     {e.nombre_submodulo}
                                 </h2>
-                                <span className="mt-0.5 block font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground transition-colors group-hover:text-primary-fg/85">
+                                {/* ⭐ MEJORA 43 — pase tipográfico (piso L14): el rol de la ficha sube de
+                                    9.5px a la etiqueta canónica (11 mono). Mismo cambio en `AlmacenHub`. */}
+                                <span className="mt-0.5 block font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground transition-colors group-hover:text-primary-fg/85">
                                     {etapa.rol}
                                 </span>
                             </div>

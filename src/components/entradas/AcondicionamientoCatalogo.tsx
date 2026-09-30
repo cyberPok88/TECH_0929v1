@@ -227,12 +227,25 @@ export function AcondicionamientoCatalogo() {
                 const e = i.entrada
                 if (!e || !puedeEditar) return null
                 const enAcondicionamiento = e.estado === 'en_acondicionamiento'
+                /**
+                 * ⭐ MEJORA 42-bis (29 Sep 2026) — **el botón dice qué se lleva.** El usuario reportó
+                 * la fila de `ING-0026` («SIN TANDAS» + este botón activo) como bug: la contradicción
+                 * era real, pero el botón es el **camino del DOCUMENTO** —el que existe para el
+                 * ingreso que nadie liberó— y lo que faltaba era **decirlo**: cuánto saldo toma y que
+                 * tomarlo **cierra la entrega por tandas** de la revisión.
+                 */
+                const saldo = Math.max(0, e.piezas_aprobadas - e.piezas_liberadas)
                 return (
                     <Button
                         type="button"
                         variant={enAcondicionamiento ? 'default' : 'outline'}
                         className="min-h-[52px] w-full"
                         onClick={() => setSeleccion(e)}
+                        title={
+                            enAcondicionamiento
+                                ? 'Cierra el acondicionamiento del ingreso y lo manda al almacén.'
+                                : `Toma el ingreso COMPLETO para acondicionarlo (saldo ${saldo} pza). Al tomarlo, la entrega por tandas de la revisión se cierra: lo que no se haya liberado entra por este camino.`
+                        }
                     >
                         <PackageCheck className="mr-1.5 h-4 w-4" aria-hidden="true" />
                         {enAcondicionamiento ? 'Completar acondicionamiento' : 'Tomar para acondicionar'}

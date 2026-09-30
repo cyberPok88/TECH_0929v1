@@ -36,6 +36,9 @@ function formVacio(): EntradaFormData {
                 atributos: {},
                 cantidad_original: '1',
                 costo_acordado: '',
+                // ⭐ MEJORA 29 Sep 2026 — mismo default que `nuevaPartida()`: la primera partida también
+                // nace pidiendo los NS. La bandera apagada hacía invisible el concentrado (medido).
+                lleva_ns: true,
             },
         ],
     }
@@ -77,6 +80,9 @@ export function EntradaModal({ open, onOpenChange, modo, entrada = null, onGuard
                         ),
                         cantidad_original: String(p.cantidad_original),
                         costo_acordado: String(p.costo_acordado),
+                        // ⭐ MEJORA 28 Sep 2026 — la bandera de D1 viaja de ida y de vuelta: si no se
+                        // releyera aquí, editar una entrada recién creada la apagaría en silencio.
+                        lleva_ns: p.lleva_ns ?? false,
                     }))
                     setForm((prev) => ({ ...prev, partidas: partidas.length ? partidas : prev.partidas }))
                 })
@@ -188,6 +194,7 @@ export function EntradaModal({ open, onOpenChange, modo, entrada = null, onGuard
                             categorias={categorias}
                             onChange={(partidas) => actualizar('partidas', partidas)}
                             disabled={cargando}
+                            esSinRevision={form.es_sin_revision}
                         />
                     </div>
 

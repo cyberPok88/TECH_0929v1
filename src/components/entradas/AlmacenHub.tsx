@@ -19,7 +19,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeftRight, Package, PackageCheck } from 'lucide-react'
+import { ArrowLeftRight, Package, PackageCheck, ScanLine } from 'lucide-react'
 
 import { Pildora } from '@/components/data-table'
 import { FILTROS_ENTRADAS_DEFAULT } from '@/components/entradas/RecepcionFilters'
@@ -32,6 +32,9 @@ const RUTA = '/dashboard/entradas/alta'
 
 /** La cola de cotejo vive como ruta hija: el submódulo `alta` la cubre por prefijo. */
 export const HREF_COTEJO = '/dashboard/entradas/alta/cotejo'
+
+/** ⭐ MEJORA 29 Sep 2026 — la consulta del concentrado, también ruta hija de `alta`. */
+export const HREF_NS = '/dashboard/entradas/alta/ns'
 
 interface FichaAlmacen {
     href: string
@@ -65,6 +68,24 @@ const FICHAS: FichaAlmacen[] = [
         icono: ArrowLeftRight,
         nombre: 'Movimientos al inventario',
         rol: 'Kardex por producto y salidas',
+    },
+    /**
+     * ⭐ MEJORA 29 Sep 2026 (usuario) — **LA 4ª FICHA: CONTROL DE NS.**
+     * *«en alta en almacén en el submenú poner una 4ta vista para el control de los NS … abra un botón
+     * buscar, y pedirá el NS y mostrará el resultado de lo que dijimos»*. Es la consulta del
+     * concentrado: de dónde vino un serial y qué pasó con él (garantía, devolución, o el proveedor
+     * intentando colar la pieza que ya se le devolvió).
+     *
+     * ⚠️ **Corrige la frase del propio usuario del 24 Sep** —*«solo eso»*, los 3 destinos—: el
+     * puesto creció y el HUB lo dice. Se anota aquí porque esa frase quedó escrita en la cabecera de
+     * este archivo y en la ayuda del módulo.
+     */
+    {
+        href: HREF_NS,
+        numero: '04',
+        icono: ScanLine,
+        nombre: 'Control de NS',
+        rol: 'De dónde vino un serial y qué pasó con él',
     },
 ]
 
@@ -146,7 +167,12 @@ export function AlmacenHub() {
                             <h2 className="truncate font-display text-[13.5px] font-semibold tracking-wide text-foreground transition-colors group-hover:text-primary-fg">
                                 {f.nombre}
                             </h2>
-                            <span className="mt-0.5 block font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground transition-colors group-hover:text-primary-fg/85">
+                            {/* ⭐ MEJORA 43 (29 Sep 2026) — **pase tipográfico (piso L14):** el rol de la
+                                ficha medía 9.5px, que es la medida del CROMO de tabla
+                                (`estilos-tabla.ts`), no la de una etiqueta de CONTENIDO. Sube a la
+                                etiqueta canónica de la SPEC §1.2 (11 mono) — el resto de la ficha ya
+                                estaba en el piso. */}
+                            <span className="mt-0.5 block font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground transition-colors group-hover:text-primary-fg/85">
                                 {f.rol}
                             </span>
                             {f.cuentaCotejo && (

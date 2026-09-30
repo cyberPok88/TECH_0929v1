@@ -50,6 +50,21 @@ export type EstadoTanda = 'por_limpiar' | 'en_limpieza' | 'en_almacen' | 'confir
  * `ajustada` **sí** queda fuera: ahí el documento ya está ruteado al **acondicionamiento clásico**, y
  * liberar sería abrir un segundo camino para lo mismo (el alta clásica coteja el saldo, así que no
  * rompería nada — pero ofrece una puerta que no hace falta).
+ *
+ * ⚠️ **CORRECCIÓN 29 Sep 2026 (usuario) — la justificación de arriba era FALSA y se corrige.** Decía
+ * que en `ajustada` *«liberar sería abrir un segundo camino para lo mismo»*. **No es lo mismo, y se
+ * midió con el caso vivo `ING-0026`:** la revisión cerró, **8 aprobadas y 0 liberadas**, Recepción
+ * generó su nota (`NC-0023` → `ajustada`)… y las 8 piezas **siguen físicamente en la mesa del
+ * técnico**. La nota es la mitad **administrativa**; la liberación es la **entrega física**, y cerrar
+ * la puerta por un trámite es exactamente lo que la MEJORA 27 ya había corregido para
+ * `revisada_sin_dev`/`con_dev` — de los que `ajustada` es el **estado siguiente** (la nota se genera
+ * *porque* la revisión cerró).
+ *
+ * **No hay doble conteo, y la reconciliación ya estaba construida:** Almacén coteja el **saldo**
+ * (`Σ aprobadas − Σ liberadas`), así que lo que salga por tanda se descuenta del camino clásico:
+ * liberar 3 de 8 después de la nota deja el saldo en 5 ⇒ 3 + 5 = 8. Sin duplicar y sin perder.
+ * **El corte físico es `en_acondicionamiento`:** al pulsar «Tomar para acondicionar» la mercancía ya
+ * entró al puesto y ahí sí se cierra la liberación.
  */
 export const ESTADOS_LIBERABLES: EstadoEntrada[] = [
     'recien_creada',
@@ -58,6 +73,9 @@ export const ESTADOS_LIBERABLES: EstadoEntrada[] = [
     // ⭐ MEJORA 27 · 22.f — la revisión CERRÓ pero la mercancía sigue esperando: se puede entregar.
     'revisada_sin_dev',
     'con_dev',
+    // ⭐ MEJORA 42-bis · 29 Sep 2026 — la nota YA se generó, pero la mercancía no se ha entregado:
+    // mientras queden aprobadas sin liberar, la entrega es de Revisión (no del cierre del documento).
+    'ajustada',
 ]
 
 /** ¿Esta entrada todavía puede entregar una tanda a Acondicionamiento? (espejo de la SA) */
@@ -144,6 +162,12 @@ export interface PartidaEntrada {
     costo_acordado: number
     estado_partida: EstadoPartida
     /**
+     * ⭐ MEJORA 28 Sep 2026 — **la mercancía de esta partida se identifica por número de serie**
+     * (D1 de la MEJORA 35): al guardar la revisión se pide el concentrado de NS. La captura
+     * Recepción; aquí llega para poder **editar** una entrada recién creada sin perder la bandera.
+     */
+    lleva_ns: boolean
+    /**
      * ⭐ MEJORA 22 Sep 2026 — DEV de la partida con el **dato real** de `devoluciones_entrada`
      * (no una resta `original − vigente`): pueden convivir una DEV viva y `cantidad_vigente`
      * intacta mientras el ajuste está pendiente. `dev_ajustada` = ya tiene `fecha_ajuste`.
@@ -218,6 +242,17 @@ export interface HuellaDevuelta {
 export interface PartidaConAvance {
     id: string
     partida: number
+    /**
+     * ⭐ MEJORA 35 (27 Sep 2026) — **la mercancía de esta partida se identifica por número de serie**:
+     * al guardar la revisión se piden los NS (el concentrado de la entrada). Es la bandera de **D1**,
+     * capturada en Recepción; vive en la PARTIDA porque es la unidad que llega y se revisa.
+     *
+     * ⚠️ **REQUERIDO, no opcional — y es una lección pagada, no un estilo** (28 Sep 2026). Nació
+     * opcional «para no tocar el mapeo» y el mapeo no se tocó: `lleva_ns` nunca llegaba al wizard y
+     * las pantallas de escaneo **no se abrían jamás**, con `tsc`/`lint`/`build` en verde. Un dato que
+     * **decide comportamiento** viaja requerido: así el compilador obliga a quien lo construye.
+     */
+    lleva_ns: boolean
     id_categoria: string | null
     categoria_nombre: string | null
     /** Snapshot de recepción (atributos `en_entrada`) — base de la huella. */
@@ -330,8 +365,55 @@ export interface NumeroSerie {
     id: string
     ns: string
     id_entrada: string
+    /**
+     * ⭐ MEJORA 29 Sep 2026 — las dos columnas que la MEJORA 35 agregó a la tabla y que **este tipo
+     * nunca recibió**: sin consumidor, el hueco no se notaba. Ahora sí lo hay (la consulta de NS de
+     * Almacén), y son justo las que hacen que un NS *cuente algo*: de qué PARTIDA salió y si era
+     * bueno o malo.
+     */
+    id_partida_entrada: string | null
+    resultado: 'PASA' | 'NO_PASA'
+    /** NULL hasta que Almacén resuelve el SKU por huella (hoy nadie lo escribe: ver la consulta). */
     id_producto: string | null
+    creado_por: string | null
     created_at: string
+}
+
+/**
+ * ⭐ MEJORA 29 Sep 2026 — **la respuesta del control de NS del puesto de Almacén.**
+ *
+ * El escenario que sirve (`bd-entradas.md` · M35): vuelve un disco con su serial y hay que decir
+ * **de dónde vino y qué pasó con él**. Lo que el concentrado **sí** sabe: entrada · proveedor · fecha
+ * · partida · bueno/malo · quién lo capturó. Lo que **no** sabe, y se declara en vez de inventarse:
+ * **la marca del NS** (una partida rinde varias filas de producto y el serial no las distingue) — por
+ * eso el producto se informa a nivel **PARTIDA** (`productos`), no por serial.
+ */
+export interface ProductoDeLaPartidaNs {
+    sku: string
+    nombre: string
+    cantidad_aprobada: number
+}
+
+export interface ResultadoConsultaNs {
+    /** El NS tal como se buscó (recortado). */
+    ns: string
+    /** `false` NO es un error: es la respuesta «este serial no está en el concentrado». */
+    encontrado: boolean
+    resultado?: 'PASA' | 'NO_PASA'
+    folio?: string
+    estado_entrada?: EstadoEntrada
+    proveedor?: string | null
+    fecha_entrada?: string
+    partida?: number | null
+    categoria?: string | null
+    /** Nombre del técnico que firmó la tanda donde se escaneó. */
+    capturado_por?: string | null
+    capturado_at?: string
+    /**
+     * Lo que esa PARTIDA rindió (SKU por huella, resuelto en Almacén). Vacío = todavía no se dio de
+     * alta, o la partida rindió varias huellas y el concentrado no puede decir cuál es este NS.
+     */
+    productos?: ProductoDeLaPartidaNs[]
 }
 
 // ── Catálogos de operación ──────────────────────────────────────────────────────
@@ -354,6 +436,13 @@ export interface PartidaEntradaForm {
     atributos: Record<string, string> // en_huella capturados en recepción (clave → valor)
     cantidad_original: string
     costo_acordado: string
+    /**
+     * ⭐ MEJORA 28 Sep 2026 — **la bandera que enciende el concentrado de NS en Revisión** (D1). Es
+     * una decisión de la PUERTA, no del técnico: quien recibe sabe si la mercancía trae serial
+     * (discos, RAM, equipos) o no (cables, adaptadores). Sin este control, la bandera nacía siempre
+     * en `false` y el wizard de revisión **nunca** pedía los NS.
+     */
+    lleva_ns: boolean
 }
 export interface EntradaFormData {
     id_proveedor: string
@@ -410,13 +499,35 @@ export interface PiezaRevision {
     resultado: 'PASA' | 'NO_PASA'
     id_motivo?: string
     porcentaje_salud?: number
-    ns?: string // solo PASA + maneja_numero_serie
+    /**
+     * ⚠️ LEGADO (MEJORA 35) — el NS **deja de ser un dato de la pieza**: se captura en el concentrado
+     * de la tanda (`NsTanda`) al guardar. Este campo queda solo como respaldo de lo capturado antes del
+     * cambio; el wizard ya no lo pide cuando la partida lleva NS.
+     */
+    ns?: string
+}
+
+/**
+ * ⭐ MEJORA 35 (27 Sep 2026) — **el CONCENTRADO de la tanda**: los NS que el técnico escanea después de
+ * revisar, primero los de las piezas que pasaron y después los de las que no. **No lleva marca ni
+ * motivo** porque el NS no los conoce: la marca la determina la REVISIÓN por huella (una partida puede
+ * rendir varias filas de producto) y el motivo vive en la DEV/tanda.
+ */
+export interface NsTanda {
+    pasa: string[]
+    noPasa: string[]
 }
 
 /** Avance de revisión de UNA partida (las piezas que el técnico firma al guardar). */
 export interface AvanceRevisionInput {
     id_entrada: string
     piezas: PiezaRevision[]
+    /**
+     * ⭐ MEJORA 35 — las dos listas del concentrado. **Sin ellas no se escribe** (D2): el wizard las
+     * pide antes de llamar a esta acción, y si el técnico cancela la captura, no se guarda nada.
+     * Sin `ns` la acción cae al respaldo legado (piezas con `ns` propio).
+     */
+    ns?: NsTanda
 }
 
 export interface ResultadoRevision {

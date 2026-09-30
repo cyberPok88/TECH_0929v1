@@ -79,7 +79,11 @@ export function EntradaDetailModal({ open, onOpenChange, entrada }: EntradaDetai
                         {entrada && (
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded border border-border bg-surface px-3 py-2 text-xs">
                                 <span className="inline-flex items-center gap-1.5">
-                                    <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground">
+                                    {/* ⭐ MEJORA 43 (29 Sep 2026) — **pase tipográfico (piso L14)**: estas
+                                        4 micro-etiquetas de CONTENIDO medían 9.5px, que es la medida del
+                                        CROMO de tabla (`estilos-tabla.ts`), no la de una etiqueta. Suben a
+                                        la etiqueta canónica de la SPEC §1.2 (11 mono). */}
+                                    <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
                                         Partidas
                                     </span>
                                     <span className="font-semibold tabular-nums text-foreground">
@@ -87,7 +91,11 @@ export function EntradaDetailModal({ open, onOpenChange, entrada }: EntradaDetai
                                     </span>
                                 </span>
                                 <span className="inline-flex items-center gap-1.5">
-                                    <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground">
+                                    {/* ⭐ MEJORA 43 (29 Sep 2026) — **pase tipográfico (piso L14)**: estas
+                                        4 micro-etiquetas de CONTENIDO medían 9.5px, que es la medida del
+                                        CROMO de tabla (`estilos-tabla.ts`), no la de una etiqueta. Suben a
+                                        la etiqueta canónica de la SPEC §1.2 (11 mono). */}
+                                    <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
                                         PZ. RECIBIDAS
                                     </span>
                                     <span className="font-semibold tabular-nums text-foreground">
@@ -95,7 +103,11 @@ export function EntradaDetailModal({ open, onOpenChange, entrada }: EntradaDetai
                                     </span>
                                 </span>
                                 <span className="inline-flex items-center gap-1.5">
-                                    <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground">
+                                    {/* ⭐ MEJORA 43 (29 Sep 2026) — **pase tipográfico (piso L14)**: estas
+                                        4 micro-etiquetas de CONTENIDO medían 9.5px, que es la medida del
+                                        CROMO de tabla (`estilos-tabla.ts`), no la de una etiqueta. Suben a
+                                        la etiqueta canónica de la SPEC §1.2 (11 mono). */}
+                                    <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
                                         DEV
                                     </span>
                                     <span
@@ -108,7 +120,11 @@ export function EntradaDetailModal({ open, onOpenChange, entrada }: EntradaDetai
                                     </span>
                                 </span>
                                 <span className="inline-flex items-center gap-1.5">
-                                    <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground">
+                                    {/* ⭐ MEJORA 43 (29 Sep 2026) — **pase tipográfico (piso L14)**: estas
+                                        4 micro-etiquetas de CONTENIDO medían 9.5px, que es la medida del
+                                        CROMO de tabla (`estilos-tabla.ts`), no la de una etiqueta. Suben a
+                                        la etiqueta canónica de la SPEC §1.2 (11 mono). */}
+                                    <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
                                         Final
                                     </span>
                                     <span

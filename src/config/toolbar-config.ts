@@ -88,13 +88,30 @@ export const toolbarConfig: Record<string, ToolbarAction[]> = {
     '/dashboard/catalogos/proveedores': [NUEVO('Nuevo proveedor'), EXPORTAR],
 
     // ── ENTRADAS (Flujo 01 · D10) ──────────────────────────────────────────────
-    // NUEVO en recepción (única ruta que crea) · EXPORTAR declarado: la página
-    // inyecta la conducta (exportarEntradasCsv) en recepción; el resto lo filtra RBAC.
+    // NUEVO en recepción (única ruta que crea).
+    //
+    // ⚠️ **MEJORA 43 (29 Sep 2026) — SE RETIRARON 4 `EXPORTAR` QUE ERAN BOTONES MUERTOS.** El
+    // comentario anterior decía *«la página inyecta la conducta (exportarEntradasCsv) en recepción; el
+    // resto lo filtra RBAC»* — y **medido**, solo `RecepcionCatalogo` la inyecta: en `revision`,
+    // `acondicionamiento`, `alta` y `divergencias` el diccionario dibujaba un **«Exportar» sin
+    // `onClick`** para todo rol con `exportar` (Administrador sí; Técnico/Almacenista no — RBAC medido
+    // en `permisos_acciones`). `SISTEMA_COMPONENTES §8`: un botón que no hace nada enseña a ignorar esa
+    // zona. Estas rutas quedan declaradas **con `[]`** (el diccionario ES el registro) y el día que una
+    // quiera exportar, agrega su fila **y** su handler, como Recepción.
     '/dashboard/entradas/recepcion': [NUEVO('Nueva entrada'), EXPORTAR],
-    '/dashboard/entradas/revision': [EXPORTAR],
-    '/dashboard/entradas/acondicionamiento': [EXPORTAR],
-    '/dashboard/entradas/alta': [EXPORTAR],
-    '/dashboard/entradas/divergencias': [EXPORTAR],
+    '/dashboard/entradas/revision': [],
+    '/dashboard/entradas/acondicionamiento': [],
+    '/dashboard/entradas/alta': [],
+    /**
+     * ⭐ MEJORA 29 Sep 2026 — **la ruta hija del control de NS se declara CON `[]`, y eso es la
+     * decisión, no un descuido** (misma doctrina que la P9 de la Guía 2.1). `Toolbar` resuelve el
+     * diccionario por el `path` que la PÁGINA declara: una ruta hija que declarara el `path` del padre
+     * heredaría sus botones, y sin `onClick` serían botones muertos. Se declara igual porque **el
+     * diccionario ES el registro** de rutas con acciones: esta tiene cero, y decirlo por escrito es
+     * más barato que dejarlo al azar.
+     */
+    '/dashboard/entradas/alta/ns': [],
+    '/dashboard/entradas/divergencias': [],
 }
 
 /**

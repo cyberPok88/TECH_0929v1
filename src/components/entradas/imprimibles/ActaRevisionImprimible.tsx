@@ -5,59 +5,72 @@
 //
 // ⭐ Pedido (usuario, 25 Sep 2026): *«agregar el botón de ver resultado … y otro de imprimir
 // revisión»* + *«las plantillas se usarán mucho, cada etapa tendrá su plantilla para imprimir»*.
-// Es el **segundo** documento del ERP y el primero que nace en `imprimibles/`: la carpeta y el
-// registro `{tipo → plantilla}` son el primer tramo del sistema de impresión, cuyo alcance está en
-// `DOCS/SISTEMA_IMPRESION.md`. Este archivo es la **plantilla**; el motor y el contenedor son los
-// que ya existen (`lib/pdf/generador.ts` + `DocumentoImprimibleDialog`).
 //
-// Qué imprime: **el acta de la revisión de la ENTRADA** — cada partida declarada, los productos
-// (huellas) que la revisión encontró, lo aprobado, lo devuelto y los totales — para firmar. No
-// repite lo que la pantalla ya dice: en papel lo que sirve es **qué se revisó, qué salió y quién
-// responde**.
+// ⭐ MEJORA 41 (29 Sep 2026) — ES EL RESPALDO EN CÓDIGO DEL CARRIL DE PLANTILLAS.
+// `DocumentoImprimible` lo pinta cuando el tipo `acta_revision` NO tiene plantilla activa en
+// la base; si el usuario activa la suya, se imprime la plantilla. Por eso recibe **`datos`**
+// —el vocabulario que arma `datos-acta-revision.ts`— y **ya no** las entidades del dominio:
+// los dos caminos imprimen lo mismo.
 //
-// ⚠️ Dos huecos DECLARADOS, no inventados (van al carril de plantillas):
-//   (a) el membrete está **hardcodeado** igual que `NotaEntradaImprimible` — el dato bueno vive en
-//       `empresa_emisora` (fila única) y debe salir de ahí cuando la plantilla sea dato;
-//   (b) la BD **no guarda quién revisó** (la entrada tiene `creado_por`, no `reviso_por`; el actor
-//       está en `transiciones_etapa`): por eso el acta **imprime la línea para firmar** en vez de un
-//       nombre que no existe.
+// ⭐ YA NO FORMATEA NI CALCULA: las fechas, los totales y el `—` de cada celda llegan
+// resueltos (el motor de plantillas tampoco formatea — ley L6). Y **ya no lleva el membrete
+// hardcodeado** («TENOCHTITLÁN — IMPERIO TECNOLÓGICO»): sale de `empresa_emisora` y viaja
+// dentro de `datos`.
 //
-// Presentacional: no llama Server Actions. Recibe `entrada` + `partidas` ya resueltas y usa
-// `lineasDePartidas()` —la MISMA fuente que el desglose de pantalla— para que el papel y la
-// pantalla no puedan decir cosas distintas (L6).
+// ⚠️ Sigue en pie el hueco DECLARADO (no inventado): la BD **no guarda quién revisó** —la
+// entrada tiene `creado_por`, no `reviso_por`; el actor vive en `transiciones_etapa`—, así que
+// el acta imprime la **línea para firmar** en vez de un nombre que no existe.
+//
+// Presentacional: no llama Server Actions; recibe todo resuelto.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { lineasDePartidas, productoDeLinea } from '@/components/entradas/columnas-entrada'
-import type { Entrada, PartidaConAvance } from '@/types/entradas'
-
-function formatearFecha(fecha: string | null): string {
-    if (!fecha) return '—'
-    const d = new Date(fecha)
-    if (Number.isNaN(d.getTime())) return fecha
-    return d.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
+import type { VariablesDocumento } from '@/lib/plantillas/motor'
 
 interface ActaRevisionImprimibleProps {
-    entrada: Entrada
-    partidas: PartidaConAvance[]
+    /** El vocabulario del papel, ya formateado (`datos-acta-revision.ts` + el membrete). */
+    datos: VariablesDocumento
 }
 
-export function ActaRevisionImprimible({ entrada, partidas }: ActaRevisionImprimibleProps) {
-    const lineas = lineasDePartidas(partidas)
-    const totalDev = partidas.reduce((s, p) => s + Number(p.dev_cantidad ?? 0), 0)
+/** Un valor del vocabulario como texto. Acá tampoco se calcula: la plantilla pinta. */
+function texto(valor: unknown): string {
+    if (valor === null || valor === undefined) return ''
+    return String(valor)
+}
+
+/** La bandera de fila: `true` en el dato (o `'true'` si el valor viajó como texto). */
+function esVerdadero(valor: unknown): boolean {
+    return valor === true || valor === 'true'
+}
+
+export function ActaRevisionImprimible({ datos }: ActaRevisionImprimibleProps) {
+    const lineas = Array.isArray(datos.lineas) ? datos.lineas : []
+    const logo = texto(datos.logo_url)
 
     return (
         <div className="text-sm text-black">
-            <div className="text-center text-lg font-bold">TENOCHTITLÁN — IMPERIO TECNOLÓGICO</div>
-            <div className="text-center text-sm font-semibold">Acta de revisión técnica de mercancía</div>
+            {/* El membrete sale de `empresa_emisora` (P7 de la Guía 2.1). Un logo vacío NO se
+                pinta: `<img src="">` apunta a la propia página y la recarga. */}
+            {logo ? (
+                // ⚠️ `<img>` a propósito (no `next/image`): es un elemento del PAPEL, que
+                //    html2canvas rasteriza. El optimizador exige `height` —y distorsionaría
+                //    un logo de proporción desconocida— y una allowlist de dominios.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logo} alt={texto(datos.nombre_comercial)} width={140} className="mb-1" />
+            ) : null}
+            <div className="text-center text-lg font-bold">
+                {texto(datos.nombre_comercial) || texto(datos.razon_social)}
+            </div>
+            <div className="text-center text-sm font-semibold">
+                Acta de revisión técnica de mercancía
+            </div>
 
             <div className="mt-3 text-[13px] font-bold">
-                FOLIO: {entrada.folio} &nbsp;&nbsp; RECEPCIÓN: {formatearFecha(entrada.fecha)}{' '}
-                &nbsp;&nbsp; FIN DE REVISIÓN: {formatearFecha(entrada.fecha_fin_rev)}
+                FOLIO: {texto(datos.folio)} &nbsp;&nbsp; RECEPCIÓN: {texto(datos.fecha_recepcion)}{' '}
+                &nbsp;&nbsp; FIN DE REVISIÓN: {texto(datos.fecha_fin_revision)}
             </div>
             <div className="text-[13px] font-bold">
-                PROVEEDOR: {entrada.proveedor_nombre ?? '—'}
-                {entrada.creador_nombre ? ` &nbsp;&nbsp; CAPTURÓ: ${entrada.creador_nombre}` : ''}
+                PROVEEDOR: {texto(datos.proveedor) || '—'}
+                {texto(datos.capturo) ? ` &nbsp;&nbsp; CAPTURÓ: ${texto(datos.capturo)}` : ''}
             </div>
 
             <table className="mt-3 w-full border-collapse">
@@ -70,60 +83,60 @@ export function ActaRevisionImprimible({ entrada, partidas }: ActaRevisionImprim
                     </tr>
                 </thead>
                 <tbody>
-                    {lineas.map((l) =>
-                        l.esPartida ? (
-                            <tr key={l.key} className="bg-black/5">
+                    {lineas.map((l, i) =>
+                        esVerdadero(l.es_partida) ? (
+                            <tr key={`p-${i}`} className="bg-black/5">
                                 <td className="border border-black px-2 py-1 font-bold">
-                                    PARTIDA {l.partida.partida} · {productoDeLinea(l)}
+                                    {texto(l.etiqueta)}
                                 </td>
                                 <td className="border border-black px-2 py-1 text-right font-bold tabular-nums">
-                                    {l.recibidas}
+                                    {texto(l.recibidas)}
                                 </td>
                                 <td className="border border-black px-2 py-1 text-right font-bold tabular-nums">
-                                    {l.partida.aprobadas}
+                                    {texto(l.aprobadas)}
                                 </td>
                                 <td className="border border-black px-2 py-1 text-right font-bold tabular-nums">
-                                    {l.partida.dev_cantidad > 0 ? l.partida.dev_cantidad : '—'}
+                                    {texto(l.dev)}
                                 </td>
                             </tr>
                         ) : (
-                            <tr key={l.key}>
+                            <tr key={`l-${i}`}>
                                 <td className="border border-black px-2 py-1 pl-6">
-                                    {productoDeLinea(l)}
+                                    {texto(l.etiqueta)}
                                 </td>
                                 <td className="border border-black px-2 py-1 text-right tabular-nums">
-                                    {l.recibidas}
+                                    {texto(l.recibidas)}
                                 </td>
                                 <td className="border border-black px-2 py-1 text-right tabular-nums">
-                                    {l.declarada ? '—' : l.aprobadas}
+                                    {texto(l.aprobadas)}
                                 </td>
                                 <td className="border border-black px-2 py-1 text-right tabular-nums">
-                                    {l.dev > 0 ? l.dev : '—'}
+                                    {texto(l.dev)}
                                 </td>
                             </tr>
                         )
                     )}
                     <tr>
                         <td className="border border-black px-2 py-1 text-right font-bold">
-                            TOTAL · {entrada.piezas_total} pza · {entrada.piezas_aprobadas} aprobadas ·
-                            DEV {totalDev}
+                            TOTAL · {texto(datos.piezas_total)} pza ·{' '}
+                            {texto(datos.piezas_aprobadas)} aprobadas · DEV {texto(datos.total_dev)}
                         </td>
                         <td className="border border-black px-2 py-1 text-right font-bold tabular-nums">
-                            {entrada.piezas_total}
+                            {texto(datos.piezas_total)}
                         </td>
                         <td className="border border-black px-2 py-1 text-right font-bold tabular-nums">
-                            {entrada.piezas_aprobadas}
+                            {texto(datos.piezas_aprobadas)}
                         </td>
                         <td className="border border-black px-2 py-1 text-right font-bold tabular-nums">
-                            {totalDev}
+                            {texto(datos.total_dev)}
                         </td>
                     </tr>
                 </tbody>
             </table>
 
             <div className="mt-3 text-[12px]">
-                Resultado de la revisión: <b>{entrada.resultado_rev === 'CON_MALAS' ? 'CON MALAS' : 'SIN MALAS'}</b>
-                &nbsp;&nbsp;·&nbsp;&nbsp; Estado del documento: <b>{entrada.estado}</b>
+                Resultado de la revisión: <b>{texto(datos.resultado)}</b>
+                &nbsp;&nbsp;·&nbsp;&nbsp; Estado del documento: <b>{texto(datos.estado)}</b>
             </div>
 
             <div className="mt-10 text-[13px]">

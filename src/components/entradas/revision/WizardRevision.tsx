@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowLeft, Check, Minus, PackageCheck, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Check, Minus, PackageCheck, Plus, ScanLine, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -32,11 +32,16 @@ import { Pildora } from '@/components/data-table'
 import { cn } from '@/lib/utils'
 
 import { listarMarcasPorCategoria } from '@/lib/actions/productos'
+import { atributosDesdeDisco } from '@/lib/lector-discos'
+import type { NsTanda } from '@/types/entradas'
+import { CapturaNsTanda } from '@/components/entradas/revision/CapturaNsTanda'
+import { PanelLectorDiscos } from '@/components/entradas/revision/PanelLectorDiscos'
 import {
     guardarAvanceRevision,
     listarCategoriasCapturables,
     listarMotivosRechazo,
     listarPartidasConAvance,
+    marcarPartidaLlevaNs,
 } from '@/lib/actions/entradas'
 import type {
     CategoriaCapturable,
@@ -82,16 +87,30 @@ export function WizardRevision({
     const [resultado, setResultado] = useState<'PASA' | 'NO_PASA'>('PASA')
     const [idMotivo, setIdMotivo] = useState('')
     const [porcentajeSalud, setPorcentajeSalud] = useState('')
-    const [ns, setNs] = useState('')
+    /**
+     * ⚠️ MEJORA 35 — el serial **ya no se pide aquí**: se captura en el concentrado de la tanda
+     * (`CapturaNsTanda`), después de revisar y antes de escribir. El estado `ns` se retiró con el campo.
+     */
+    /**
+     * ⭐ MEJORA 35 (27 Sep 2026) — **el concentrado de la tanda**. Al pulsar Guardar, si la entrada
+     * lleva número de serie, se abren las dos pantallas de escaneo (los que pasaron / los que no) y
+     * **hasta que no se completan no se escribe nada** (D2). `resolverNs` es la promesa que resuelven:
+     * `null` = el técnico canceló → la tanda NO se guarda.
+     */
+    const [capturaNs, setCapturaNs] = useState<{ pasa: number; noPasa: number } | null>(null)
+    const [resolverNs, setResolverNs] = useState<((v: NsTanda | null) => void) | null>(null)
     const [items, setItems] = useState<PiezaRevision[]>([])
     const [objetivo, setObjetivo] = useState('')
     const [cargando, setCargando] = useState(false)
+    /** ⭐ MEJORA 28 Sep 2026 — la escritura de la bandera de NS va aparte de `cargando`: apagar el
+     *  wizard entero (Atrás, Guardar) por un interruptor de un dato sería desproporcionado. */
+    const [cambiandoNs, setCambiandoNs] = useState(false)
 
     const limpiarEditor = useCallback((conservarMarca = true) => {
         setResultado('PASA')
         setIdMotivo('')
         setPorcentajeSalud('')
-        setNs('')
+        // (MEJORA 35) aquí se limpiaba el serial por pieza: ya no existe ese campo.
         if (!conservarMarca) setMarcaSel('')
     }, [])
 
@@ -173,7 +192,13 @@ export function WizardRevision({
     /** Huella = atributos de recepción (snapshot) + revisión + automáticos. */
     const construirHuella = (): Record<string, string> => {
         const huella: Record<string, string> = { ...atributos }
-        for (const d of defaults) huella[d.clave] = d.valor_default as string
+        for (const d of defaults) {
+            // ⭐ MEJORA 44 — la LECTURA manda: si el disco ya dijo el dato (un disco de
+            // 5425 rpm no es de 7200), el `valor_default` NO lo pisa. El default queda
+            // como respaldo para cuando nadie leyó el disco.
+            if (huella[d.clave]) continue
+            huella[d.clave] = d.valor_default as string
+        }
         return huella
     }
 
@@ -217,13 +242,38 @@ export function WizardRevision({
                 id_motivo: resultado === 'NO_PASA' ? idMotivo : undefined,
                 porcentaje_salud:
                     resultado === 'NO_PASA' && porcentajeSalud !== '' ? Number(porcentajeSalud) : undefined,
-                ns: resultado === 'PASA' && ns ? ns : undefined,
+                // ⚠️ MEJORA 35 — el serial NO viaja en la pieza: va en el concentrado de la tanda.
             },
         ])
         limpiarEditor(true) // conserva la marca (el técnico suele repetirla)
     }
 
     const quitarPieza = (i: number) => setItems((prev) => prev.filter((_, idx) => idx !== i))
+
+    /**
+     * ⭐ MEJORA 28 Sep 2026 — **encender/apagar la bandera de NS de la partida del turno.** Es una
+     * escritura real (`marcarPartidaLlevaNs`), no estado local: el guardado la vuelve a leer y el
+     * servidor la exige para aceptar el concentrado (D2). Existe porque la bandera nació sin escritor
+     * y `editarEntrada` está cerrado a `recien_creada`: lo ya entrado al flujo no tenía por dónde
+     * corregirse. Decisión del usuario: la puerta es el técnico, que tiene la pieza en la mano.
+     */
+    const alternarNs = async () => {
+        if (!partidaActual || cambiandoNs) return
+        const nuevo = !partidaActual.lleva_ns
+        setCambiandoNs(true)
+        const res = await marcarPartidaLlevaNs(partidaActual.id, nuevo)
+        setCambiandoNs(false)
+        if (!res.success) {
+            toast.error(res.error ?? 'No se pudo cambiar la bandera de número de serie.')
+            return
+        }
+        setPartidas((prev) => prev.map((p) => (p.id === partidaActual.id ? { ...p, lleva_ns: nuevo } : p)))
+        toast.success(
+            nuevo
+                ? 'Esta partida pedirá escanear los NS al guardar el avance.'
+                : 'Esta partida ya no pedirá NS.'
+        )
+    }
 
     /**
      * ⭐ MEJORA 25 — persiste el turno y devuelve las partidas RECARGADAS (o `null` si no se pudo).
@@ -240,7 +290,35 @@ export function WizardRevision({
             return null
         }
         setCargando(true)
-        const res = await guardarAvanceRevision({ id_entrada: entrada.id, piezas: items })
+        // ⭐ MEJORA 35 — el CONCENTRADO: si la partida de este turno lleva NS, se piden ANTES de
+        // escribir (D2: sin NS no se guarda una tanda). Primero los que pasaron, después los que no.
+        /**
+         * ⚠️ MEJORA 28 Sep 2026 — **la bandera se pregunta por la PARTIDA DEL TURNO, no por la entrada.**
+         * Antes era `partidas.some(p => p.lleva_ns)`: bastaba que UNA partida del ingreso llevara NS
+         * para que el concentrado se pidiera también al revisar otra que no los lleva. El turno
+         * (`items`) es siempre de una sola partida — `cambiarPartida` lo vacía al cambiar.
+         */
+        const pideNs = partidaActual?.lleva_ns === true
+        const nPasa = items.filter((p) => p.resultado === 'PASA').length
+        const nNoPasa = items.filter((p) => p.resultado === 'NO_PASA').length
+        let nsTanda: NsTanda | undefined
+        if (pideNs && nPasa + nNoPasa > 0) {
+            const capturados = await new Promise<NsTanda | null>((resolve) => {
+                setResolverNs(() => resolve)
+                setCapturaNs({ pasa: nPasa, noPasa: nNoPasa })
+            })
+            setCapturaNs(null)
+            setResolverNs(null)
+            if (!capturados) {
+                // ⚠️ Cancelar la captura NO puede dejar el wizard en «Guardando…»: sin liberar el
+                // estado, los tres botones del pie quedaban apagados y el modal parecía colgado.
+                setCargando(false)
+                return null // canceló: la tanda no se guarda
+            }
+            nsTanda = capturados
+        }
+
+        const res = await guardarAvanceRevision({ id_entrada: entrada.id, piezas: items, ns: nsTanda })
         setCargando(false)
         if (!res.success) {
             toast.error(res.error ?? 'No se pudo guardar el avance.')
@@ -328,6 +406,54 @@ export function WizardRevision({
                                 ))}
                             </select>
                         </div>
+
+                        {/* ⭐ MEJORA 28 Sep 2026 — **la bandera de NS, corregible desde el puesto.**
+                            Dice su consecuencia en las dos direcciones: encendida cambia el trabajo
+                            del técnico (al guardar escaneará un NS por pieza) y apagada lo quita. Es la
+                            puerta que faltaba para lo que ya había entrado al flujo sin bandera. */}
+                        {partidaActual ? (
+                            <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface-2 px-3 py-2.5">
+                                <Button
+                                    type="button"
+                                    variant={partidaActual.lleva_ns ? 'default' : 'outline'}
+                                    className="min-h-11 gap-2 px-3.5 text-[13.5px]"
+                                    onClick={() => void alternarNs()}
+                                    disabled={cargando || cambiandoNs}
+                                    aria-pressed={partidaActual.lleva_ns}
+                                    data-accion="lleva-ns"
+                                >
+                                    <ScanLine className="h-4 w-4" aria-hidden="true" />
+                                    {partidaActual.lleva_ns ? 'Esta partida lleva NS' : 'Esta partida no lleva NS'}
+                                </Button>
+                                <span className="text-[11.5px] text-muted-foreground">
+                                    {partidaActual.lleva_ns
+                                        ? 'Al guardar el avance se escaneará un NS por cada pieza: uno por aprobada y uno por devuelta.'
+                                        : 'Al guardar no se pedirán escaneos. Enciéndelo si esta mercancía trae número de serie.'}
+                                </span>
+                            </div>
+                        ) : null}
+
+                        {/* ⭐ MEJORA 44 — LEER LOS DISCOS DEL DOCK. El navegador no puede leer un
+                            disco: se lo pide al AGENTE de esta misma PC. Trae el NS del firmware, la
+                            marca, las horas y ⭐ LA SALUD (el `Health` de HDSentinel, que es lo que
+                            decide: 100 pasa; menos es devolución). Lo que se aplica es una
+                            SUGERENCIA editable — el técnico confirma o corrige. */}
+                        <PanelLectorDiscos
+                            aplica={/hdd|ssd|m\.2|disco/i.test(partidaActual?.categoria_nombre ?? '')}
+                            onElegir={(d) => {
+                                const m = marcas.find(
+                                    (x) => x.nombre.toLowerCase() === (d.marca ?? '').toLowerCase()
+                                )
+                                if (m) setMarcaSel(m.id)
+                                else if (d.marca) {
+                                    toast.error(`La marca «${d.marca}» no está en el catálogo: elegila a mano.`)
+                                }
+                                const leidos = atributosDesdeDisco(d, esquema)
+                                if (Object.keys(leidos).length > 0) {
+                                    setAtributos((prev) => ({ ...prev, ...leidos }))
+                                }
+                            }}
+                        />
 
                         {/* Hero: avance de la partida */}
                         <div className="space-y-2 rounded-lg border bg-surface-2 p-4">
@@ -599,18 +725,7 @@ export function WizardRevision({
                                         </div>
                                     )}
                                 </div>
-                            ) : (
-                                <div className="space-y-1">
-                                    <Label className="text-xs">N/S (opcional)</Label>
-                                    <Input
-                                        className="h-11 w-full sm:w-64"
-                                        placeholder="escanea el serial"
-                                        value={ns}
-                                        onChange={(e) => setNs(e.target.value)}
-                                        disabled={cargando}
-                                    />
-                                </div>
-                            )}
+                            ) : null}
 
                             {/* ④ «Registrar y seguir»: la acción resuelve y deja lista la siguiente
                                 pieza — no hay que cerrar nada para continuar el turno. */}
@@ -671,6 +786,20 @@ export function WizardRevision({
                             : `Guardar avance (${items.length} pieza${items.length === 1 ? '' : 's'})`}
                     </Button>
                 </DialogFooter>
+
+                {/* ⭐ MEJORA 35 (27 Sep 2026) — **las dos pantallas del concentrado**: se abren al pulsar
+                    Guardar y, sin completarlas, no se escribe nada (D2). Van en z mayor que el diálogo
+                    para que el técnico no pierda el turno que está firmando. */}
+                {capturaNs && resolverNs ? (
+                    <CapturaNsTanda
+                        pasa={capturaNs.pasa}
+                        noPasa={capturaNs.noPasa}
+                        folio={entrada?.folio ?? ''}
+                        partida={partidaActual?.partida ?? null}
+                        onListo={(lista) => resolverNs(lista)}
+                        onCancelar={() => resolverNs(null)}
+                    />
+                ) : null}
             </DialogContent>
         </Dialog>
     )

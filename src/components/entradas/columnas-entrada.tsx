@@ -425,11 +425,26 @@ export const columnaEstadoRevision: ColumnaEntrada = {
         // RLS por etapa. Así que se dice la **acción pendiente de la etapa**, como el resto de las
         // colas («Revisar», «Generar nota»): el saldo ya viaja en la fila.
         const porLiberar = Math.max(0, fila.piezas_aprobadas - fila.piezas_liberadas)
-        if (porLiberar > 0 && (fila.estado === 'revisada_sin_dev' || fila.estado === 'con_dev')) {
+        /**
+         * ⭐ MEJORA 42-bis (29 Sep 2026) — **`ajustada` entra a este rótulo.** Con la nota ya generada
+         * (`ajustada`) y la mercancía **sin entregar**, el mapa daba «Otra etapa»… y esconde trabajo
+         * real de esta etapa: la fila le toca al técnico. Lo reportó el usuario con `ING-0026`
+         * (`NC-0023`, **8 aprobadas · 0 liberadas**): *«esa entrada en revisión el estado dice “otra
+         * etapa”, y las partidas ya no tienen el botón de liberar»*. Se arregló la regla
+         * (`ESTADOS_LIBERABLES`) y aquí se dice la **acción pendiente**: «Por liberar (n)».
+         * El tono: `ajustada` trae `listo` (verde = cumplido) en el mapa de la etapa, y al lado de un
+         * pendiente eso miente ⇒ se pinta con el tono de *pendiente* (ámbar tinta, criterio §2.7).
+         */
+        if (
+            porLiberar > 0 &&
+            (fila.estado === 'revisada_sin_dev' ||
+                fila.estado === 'con_dev' ||
+                fila.estado === 'ajustada')
+        ) {
             return (
                 <Pildora
                     texto={`Por liberar (${porLiberar})${fila.estado === 'con_dev' ? ' · con DEV' : ''}`}
-                    tono={TONO_ETAPA_REVISION[fila.estado]}
+                    tono={fila.estado === 'ajustada' ? 'advertencia' : TONO_ETAPA_REVISION[fila.estado]}
                 />
             )
         }

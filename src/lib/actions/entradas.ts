@@ -20,6 +20,7 @@ import type {
     DevolucionEntrada,
     Divergencia,
     Entrada,
+    EstadoEntrada,
     EstadoTanda,
     FiltrosEntradas,
     HuellaResuelta,
@@ -29,6 +30,8 @@ import type {
     PartidaConAvance,
     PartidaEntrada,
     PartidaResuelta,
+    ProductoDeLaPartidaNs,
+    ResultadoConsultaNs,
     RespuestaAccion,
     RespuestaDato,
     RespuestaLista,
@@ -330,6 +333,10 @@ export async function crearEntrada(
         partida: i + 1,
         id_categoria: p.id_categoria || null,
         atributos: p.atributos ?? {},
+        // ⭐ MEJORA 28 Sep 2026 (D1) — **la bandera que enciende el concentrado de NS en Revisión.**
+        // Hasta hoy la app NO tenía ningún escritor de esta columna: nacía en `false` y el wizard de
+        // revisión no pedía los NS jamás. La captura la puerta, aquí.
+        lleva_ns: p.lleva_ns,
         cantidad_original: Number(p.cantidad_original),
         cantidad_vigente: Number(p.cantidad_original),
         costo_acordado: Number(p.costo_acordado),
@@ -384,6 +391,9 @@ export async function editarEntrada(
         partida: i + 1,
         id_categoria: p.id_categoria || null,
         atributos: p.atributos ?? {},
+        // ⭐ MEJORA 28 Sep 2026 (D1) — reemplazo de partidas en `recien_creada`: la bandera viene del
+        // modal (que la releyó de la BD), así que editar no la pierde.
+        lleva_ns: p.lleva_ns,
         cantidad_original: Number(p.cantidad_original),
         cantidad_vigente: Number(p.cantidad_original),
         costo_acordado: Number(p.costo_acordado),
@@ -401,7 +411,7 @@ export async function listarPartidasEntrada(idEntrada: string): Promise<Respuest
     const supabase = await createClient()
     const { data, error } = await supabase
         .from('partidas_entrada')
-        .select('id, id_entrada, partida, id_categoria, categorias_producto(nombre), atributos, cantidad_original, cantidad_vigente, costo_acordado, estado_partida, devoluciones_entrada(cantidad, fecha_ajuste)')
+        .select('id, id_entrada, partida, lleva_ns, id_categoria, categorias_producto(nombre), atributos, cantidad_original, cantidad_vigente, costo_acordado, estado_partida, devoluciones_entrada(cantidad, fecha_ajuste)')
         .eq('id_entrada', idEntrada)
         .order('partida', { ascending: true })
     if (error) return { success: false, error: error.message }
@@ -409,6 +419,7 @@ export async function listarPartidasEntrada(idEntrada: string): Promise<Respuest
         id: string
         id_entrada: string
         partida: number
+        lleva_ns: boolean
         id_categoria: string | null
         categorias_producto: { nombre: string } | null
         atributos: Record<string, unknown> | null
@@ -421,6 +432,9 @@ export async function listarPartidasEntrada(idEntrada: string): Promise<Respuest
         id: p.id,
         id_entrada: p.id_entrada,
         partida: p.partida,
+        // ⭐ MEJORA 28 Sep 2026 — la bandera de D1 también aquí: es la que el modal de edición
+        // devuelve tal cual la recibió (sin ella, editar apagaba el concentrado de NS).
+        lleva_ns: p.lleva_ns ?? false,
         id_categoria: p.id_categoria,
         categoria_nombre: p.categorias_producto?.nombre ?? null,
         atributos: p.atributos ?? {},
@@ -448,7 +462,7 @@ export async function listarPartidasConAvance(idEntrada: string): Promise<Respue
     const supabase = await createClient()
     const { data, error } = await supabase
         .from('partidas_entrada')
-        .select('id, partida, id_categoria, categorias_producto(nombre), atributos, cantidad_original, cantidad_vigente, costo_acordado, estado_partida')
+        .select('id, partida, lleva_ns, id_categoria, categorias_producto(nombre), atributos, cantidad_original, cantidad_vigente, costo_acordado, estado_partida')
         .eq('id_entrada', idEntrada)
         .order('partida', { ascending: true })
     if (error) return { success: false, error: error.message }
@@ -456,6 +470,7 @@ export async function listarPartidasConAvance(idEntrada: string): Promise<Respue
     const filas = (data ?? []) as unknown as {
         id: string
         partida: number
+        lleva_ns: boolean
         id_categoria: string | null
         categorias_producto: { nombre: string } | null
         atributos: Record<string, unknown> | null
@@ -616,6 +631,10 @@ export async function listarPartidasConAvance(idEntrada: string): Promise<Respue
             return {
                 id: f.id,
                 partida: f.partida,
+                // ⭐ MEJORA 35 — **la bandera que enciende las pantallas de escaneo del wizard**. Faltaba
+                // en este mapeo: sin ella el wizard nunca sabía que la partida lleva NS (el bug que hacía
+                // que «no pasara nada» al guardar).
+                lleva_ns: f.lleva_ns ?? false,
                 id_categoria: f.id_categoria,
                 categoria_nombre: f.categorias_producto?.nombre ?? null,
                 atributos: f.atributos ?? {},
@@ -634,6 +653,178 @@ export async function listarPartidasConAvance(idEntrada: string): Promise<Respue
                 estado_partida: f.estado_partida as PartidaEntrada['estado_partida'],
             }
         }),
+    }
+}
+
+/**
+ * ⭐ MEJORA 28 Sep 2026 — **la bandera de NS también la puede encender el TÉCNICO.**
+ *
+ * D1 dice que la bandera la decide la puerta (Recepción) y así se captura al crear la entrada. Pero
+ * la bandera nació **sin ningún escritor** en la app, así que todo lo que ya había entrado al flujo
+ * quedó en `false` — y con `editarEntrada` cerrado a `recien_creada`, esas partidas no tenían por
+ * dónde corregirse: el concentrado de NS no se pedía nunca. El técnico es quien tiene la pieza en la
+ * mano y descubre que trae serial, así que la puerta se abre **en Revisión, mientras la entrada se
+ * está revisando** (decisión del usuario, 28 Sep 2026).
+ *
+ * `partidas_entrada_update` (RLS por etapa, MEJORA 26) ya permite `revision/editar`: no se toca
+ * ninguna política. Sí se exige el estado: fuera de la ventana de revisión la bandera ya no significa
+ * nada y se rechaza con el motivo a la vista.
+ */
+export async function marcarPartidaLlevaNs(
+    idPartida: string,
+    llevaNs: boolean
+): Promise<RespuestaAccion> {
+    const supabase = await createClient()
+    const sesion = await sesionActiva(supabase)
+    if ('error' in sesion) return { success: false, error: sesion.error }
+
+    const { data: fila } = await supabase
+        .from('partidas_entrada')
+        .select('id, partida, id_entrada, estado_partida, entradas(estado)')
+        .eq('id', idPartida)
+        .single()
+    if (!fila) return { success: false, error: 'La partida no existe.' }
+    // El cliente sin tipos devuelve la relación como arreglo: se estrecha a mano (patrón de la casa).
+    const partida = fila as unknown as {
+        id: string
+        partida: number
+        id_entrada: string
+        estado_partida: string
+        entradas: { estado: string } | null
+    }
+
+    const estado = partida.entradas?.estado ?? ''
+    /**
+     * ⭐ MEJORA 29 Sep 2026 — **la ventana es «mientras queden TANDAS por guardar», no un estado del
+     * documento.** La regla anterior miraba solo el estado de la entrada y dejaba fuera el caso real:
+     * un documento que ya cerró su revisión (`con_dev` · `revisada_sin_dev`) con una partida todavía
+     * `PENDIENTE` — exactamente cuando al técnico le quedan piezas y descubre que traen serial.
+     * En Revisión la bandera **cambia lo que se pedirá al guardar**, así que solo tiene sentido
+     * mientras haya un guardado por delante.
+     */
+    const EN_REVISION = ['recien_creada', 'lista_para_revision', 'en_revision']
+    const CERRADA_CON_PARTIDA_ABIERTA = ['revisada_sin_dev', 'con_dev']
+    const partidaAbierta = partida.estado_partida === 'PENDIENTE'
+    if (
+        !EN_REVISION.includes(estado) &&
+        !(CERRADA_CON_PARTIDA_ABIERTA.includes(estado) && partidaAbierta)
+    ) {
+        return {
+            success: false,
+            error: 'Esta partida ya cerró su revisión: la bandera de número de serie ya no cambia lo que se pide al guardar.',
+        }
+    }
+
+    const { data: upd, error } = await supabase
+        .from('partidas_entrada')
+        .update({ lleva_ns: llevaNs })
+        .eq('id', idPartida)
+        .select('id')
+    if (error) return { success: false, error: error.message }
+    // La RLS puede filtrar la fila en silencio: si no volvió ninguna, NO se escribió.
+    const errFilas = sinEscritura(upd, 'cambiar la bandera de número de serie de la partida')
+    if (errFilas) return { success: false, error: errFilas }
+
+    return { success: true }
+}
+
+/**
+ * ⭐ MEJORA 29 Sep 2026 — **el CONTROL DE NS del puesto de Almacén.**
+ *
+ * El escenario que lo justifica (`docs/bd-entradas.md` · M35): vuelve un disco con su serial —una
+ * garantía, o el proveedor intentando colar la pieza que ya se le devolvió— y hay que decir **de
+ * dónde vino y qué pasó con él**. Antes eso solo se podía averiguar abriendo entradas una por una.
+ *
+ * ⚠️ Lo que esta consulta **no** puede decir, y por eso se declara en vez de disimularse:
+ *   · **la marca del NS** — el concentrado no la sabe (una partida rinde varias filas de producto y
+ *     el serial no las distingue: corrección del usuario en la M35). Por eso el producto se informa
+ *     a nivel **PARTIDA**, que es el nivel que sí lo sabe;
+ *   · **`numeros_serie.id_producto`** — hoy nadie lo escribe, ni el alta; el SKU se deriva de la
+ *     partida (`partidas_resueltas.id_producto`, que resuelve Almacén por huella);
+ *   · **cuándo salió** (Ventas 1.8) y **dónde está** (que 1.5 lleve el NS en el lote) — enchufes
+ *     declarados de otros módulos, no huecos de esta pantalla.
+ *
+ * `encontrado: false` viaja como **éxito**: «este serial no está en el concentrado» es una respuesta
+ * (y una útil: un disco que se devolvió tampoco está en stock), no un error de la consulta.
+ */
+export async function consultarNumeroSerie(nsCrudo: string): Promise<RespuestaDato<ResultadoConsultaNs>> {
+    const ns = nsCrudo.trim()
+    if (!ns) return { success: false, error: 'Escanea o escribe un número de serie.' }
+
+    const supabase = await createClient()
+    const { data, error } = await supabase
+        .from('numeros_serie')
+        .select(
+            'ns, resultado, id_partida_entrada, creado_por, created_at, entradas(folio, fecha, estado, proveedores(nombre_comercial)), usuarios(nombre_completo)'
+        )
+        .eq('ns', ns)
+        .maybeSingle()
+    if (error) return { success: false, error: error.message }
+    if (!data) return { success: true, data: { ns, encontrado: false } }
+
+    const fila = data as unknown as {
+        ns: string
+        resultado: 'PASA' | 'NO_PASA'
+        id_partida_entrada: string | null
+        creado_por: string | null
+        created_at: string
+        entradas: {
+            folio: string
+            fecha: string
+            estado: EstadoEntrada
+            proveedores: { nombre_comercial: string } | null
+        } | null
+        usuarios: { nombre_completo: string } | null
+    }
+
+    /** Lo que esa PARTIDA rindió. Vacío = todavía no pasó Almacén (o rindió varias huellas). */
+    let partida: number | null = null
+    let categoria: string | null = null
+    let productos: ProductoDeLaPartidaNs[] = []
+    if (fila.id_partida_entrada) {
+        const { data: p } = await supabase
+            .from('partidas_entrada')
+            .select(
+                'partida, categorias_producto(nombre), partidas_resueltas(cantidad_aprobada, productos(sku, nombre))'
+            )
+            .eq('id', fila.id_partida_entrada)
+            .maybeSingle()
+        const conPartida = p as unknown as {
+            partida: number
+            categorias_producto: { nombre: string } | null
+            partidas_resueltas:
+                | { cantidad_aprobada: number; productos: { sku: string; nombre: string } | null }[]
+                | null
+        } | null
+        if (conPartida) {
+            partida = conPartida.partida
+            categoria = conPartida.categorias_producto?.nombre ?? null
+            productos = (conPartida.partidas_resueltas ?? [])
+                .filter((r) => r.productos !== null)
+                .map((r) => ({
+                    sku: r.productos!.sku,
+                    nombre: r.productos!.nombre,
+                    cantidad_aprobada: Number(r.cantidad_aprobada),
+                }))
+        }
+    }
+
+    return {
+        success: true,
+        data: {
+            ns: fila.ns,
+            encontrado: true,
+            resultado: fila.resultado,
+            folio: fila.entradas?.folio,
+            estado_entrada: fila.entradas?.estado,
+            proveedor: fila.entradas?.proveedores?.nombre_comercial ?? null,
+            fecha_entrada: fila.entradas?.fecha,
+            partida,
+            categoria,
+            capturado_por: fila.usuarios?.nombre_completo ?? null,
+            capturado_at: fila.created_at,
+            productos,
+        },
     }
 }
 
@@ -855,6 +1046,12 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
     // ⚠️ Es una relectura, no un candado: dos guardados EXACTAMENTE simultáneos aún podrían pasar
     // los dos (haría falta un `for update` en una función, como `fn_liberar_avance`). Se declara.
     const deltaPorPartida = new Map<string, { ok: number; mal: number }>()
+    /**
+     * ⭐ MEJORA 28 Sep 2026 (D1/D2) — **qué partidas de este turno se identifican por NS.** Se llena
+     * en la MISMA relectura del tope (no cuesta un viaje más) y decide, antes de escribir: si alguna
+     * la lleva, el concentrado es obligatorio y tiene que cuadrar.
+     */
+    const partidasConNs = new Set<string>()
     for (const p of pasa) {
         const acc = deltaPorPartida.get(p.id_partida_entrada) ?? { ok: 0, mal: 0 }
         acc.ok += 1
@@ -867,11 +1064,16 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
     }
     for (const [idPartida, delta] of deltaPorPartida) {
         const [{ data: partida }, { data: resueltas }, { data: devs }] = await Promise.all([
-            supabase.from('partidas_entrada').select('cantidad_original, partida').eq('id', idPartida).single(),
+            supabase
+                .from('partidas_entrada')
+                .select('cantidad_original, partida, lleva_ns')
+                .eq('id', idPartida)
+                .single(),
             supabase.from('partidas_resueltas').select('cantidad_aprobada').eq('id_partida_entrada', idPartida),
             supabase.from('devoluciones_entrada').select('cantidad').eq('id_partida_entrada', idPartida),
         ])
         if (!partida) continue
+        if (partida.lleva_ns) partidasConNs.add(idPartida)
         const yaOk = (resueltas ?? []).reduce((s, r) => s + Number(r.cantidad_aprobada ?? 0), 0)
         const yaMal = (devs ?? []).reduce((s, d) => s + Number(d.cantidad ?? 0), 0)
         const original = Number(partida.cantidad_original)
@@ -938,15 +1140,75 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
         }
     }
 
-    // NS de piezas PASA (serializadas) — sin SKU (lo asigna Almacén).
-    for (const p of pasa) {
-        if (p.ns) {
-            const { error: errNs } = await supabase.from('numeros_serie').insert({
-                ns: p.ns,
-                id_entrada: input.id_entrada,
-                creado_por: sesion.userId,
-            })
+    /**
+     * ⭐ MEJORA 35 (27 Sep 2026) — **el CONCENTRADO de la tanda**: los NS que el técnico escaneó en las
+     * dos pantallas, con su partida y su resultado (PASA / NO_PASA). El NS **no es un dato de la pieza**:
+     * es el concentrado de la ENTRADA — y por eso el `UNIQUE` de `ns` impide que un disco rechazado
+     * vuelva a entrar. Se escribe en UNA inserción con la tanda (D2: sin NS no hay guardado).
+     * La marca y el motivo NO se guardan aquí: el NS no los conoce (corrección del usuario, 27 Sep).
+     */
+    if (input.ns) {
+        /**
+         * ⭐ MEJORA 28 Sep 2026 — **D2, aplicada en el SERVIDOR.** El concentrado no es un adorno de la
+         * UI: si la partida del turno se identifica por NS y no llega, NO se escribe (misma doctrina que
+         * el tope de la MEJORA 25 — la UI protege al técnico de sí mismo, el servidor protege el dato).
+         * Y **cuadra exacto**: un NS por pieza aprobada y otro por cada devuelta. Un concentrado más
+         * largo que el turno es basura que el `UNIQUE` de `ns` volvería irreversible.
+         * El tope del cliente ya lo impide; esto lo hace imposible por cualquier puerta.
+         */
+        if (input.ns.pasa.length !== pasa.length || input.ns.noPasa.length !== noPasa.length) {
+            return {
+                success: false,
+                error: `El concentrado no cuadra con el turno: ${input.ns.pasa.length} NS aprobados contra ${pasa.length} pieza(s) aprobadas y ${input.ns.noPasa.length} NS devueltos contra ${noPasa.length} devuelta(s).`,
+            }
+        }
+        const todosNs = [...input.ns.pasa, ...input.ns.noPasa].map((ns) => ns.trim())
+        if (todosNs.some((ns) => !ns)) {
+            return { success: false, error: 'Hay un NS vacío en el concentrado.' }
+        }
+        if (new Set(todosNs).size !== todosNs.length) {
+            return { success: false, error: 'Hay un NS repetido dentro del mismo concentrado.' }
+        }
+        // La partida se atribuye SOLO cuando la tanda entera es de una. Si el técnico revisó piezas de
+        // dos partidas, el NS queda colgando de la ENTRADA (NULL) antes que inventar a cuál pertenece (L6).
+        const partidasTanda = new Set(input.piezas.map((p) => p.id_partida_entrada))
+        const idPartidaTanda = partidasTanda.size === 1 ? [...partidasTanda][0] : null
+        const filasNs = [
+            ...input.ns.pasa.map((ns) => ({ ns: ns.trim(), resultado: 'PASA' })),
+            ...input.ns.noPasa.map((ns) => ({ ns: ns.trim(), resultado: 'NO_PASA' })),
+        ].map((f) => ({
+            ns: f.ns,
+            id_entrada: input.id_entrada,
+            id_partida_entrada: idPartidaTanda,
+            resultado: f.resultado,
+            creado_por: sesion.userId,
+        }))
+        if (filasNs.length) {
+            const { error: errNs } = await supabase.from('numeros_serie').insert(filasNs)
             if (errNs) return { success: false, error: errNs.message }
+        }
+    } else {
+        /**
+         * ⭐ MEJORA 28 Sep 2026 — **sin concentrado solo se puede guardar si NINGUNA partida del turno
+         * lleva NS.** Si alguna lo lleva, el guardado se detiene con el motivo a la vista en vez de
+         * escribir una tanda sin constancia (D2).
+         */
+        if (partidasConNs.size > 0) {
+            return {
+                success: false,
+                error: 'Esta partida se identifica por número de serie: faltan los NS del turno. Vuelve a guardar y escanéalos.',
+            }
+        }
+        // ⚠️ Respaldo LEGADO: piezas capturadas con `ns` propio antes de la MEJORA 35.
+        for (const p of pasa) {
+            if (p.ns) {
+                const { error: errNs } = await supabase.from('numeros_serie').insert({
+                    ns: p.ns,
+                    id_entrada: input.id_entrada,
+                    creado_por: sesion.userId,
+                })
+                if (errNs) return { success: false, error: errNs.message }
+            }
         }
     }
 

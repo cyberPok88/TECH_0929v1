@@ -22,7 +22,7 @@
 // Diseño aprobado: `DOCS/design/entradas/recepcion-puesto-tactil.html` §7 (opción A).
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, ScanLine, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,6 +36,18 @@ function nuevaPartida(): PartidaEntradaForm {
         atributos: {},
         cantidad_original: '1',
         costo_acordado: '',
+        /**
+         * ⭐ MEJORA 29 Sep 2026 — **NACE ENCENDIDA.** Antes nacía apagada y el concentrado de NS era
+         * invisible: medido en la prueba del usuario, `ING-0023`, `ING-0024` e `ING-0025` entraron con
+         * `lleva_ns = false` y el modal **nunca** se abrió — *«el problema persiste»*. La bandera no
+         * puede depender de que alguien se acuerde de un interruptor: la mercancía de este ERP trae
+         * serial casi siempre (discos, RAM, equipos), así que el default correcto es que SÍ.
+         *
+         * Y el default es seguro porque las dos partes pueden corregirlo en su propio momento: la
+         * puerta lo apaga aquí, y el técnico lo apaga desde el wizard con la pieza en la mano. Un
+         * default que nadie puede deshacer sería una trampa; este se deshace donde se descubre.
+         */
+        lleva_ns: true,
     }
 }
 
@@ -84,9 +96,21 @@ interface PartidasEntradaGridProps {
     categorias: CategoriaCapturable[]
     onChange: (partidas: PartidaEntradaForm[]) => void
     disabled?: boolean
+    /**
+     * ⭐ MEJORA 28 Sep 2026 — la entrada es **mercancía nueva** (camino 2: salta la revisión). La
+     * bandera de NS se apaga **diciendo por qué** en vez de ofrecer un control que no va a servir:
+     * sin revisión no hay concentrado, y un control muerto enseña a ignorar esa zona.
+     */
+    esSinRevision?: boolean
 }
 
-export function PartidasEntradaGrid({ partidas, categorias, onChange, disabled = false }: PartidasEntradaGridProps) {
+export function PartidasEntradaGrid({
+    partidas,
+    categorias,
+    onChange,
+    disabled = false,
+    esSinRevision = false,
+}: PartidasEntradaGridProps) {
     const categoriaDe = (id: string) => categorias.find((c) => c.id === id) ?? null
     // ⭐ Campos que la RECEPCIÓN muestra: los `en_entrada` + los `derivado_de`
     // (read-only). Se excluye lo automático (`valor_default`, ej. rpm=7200).
@@ -341,6 +365,36 @@ export function PartidasEntradaGrid({ partidas, categorias, onChange, disabled =
                                         </b>
                                     </span>
                                 )}
+                            </div>
+                        </div>
+
+                        {/* ⭐ MEJORA 28 Sep 2026 — **D1: ¿esta mercancía se identifica por NÚMERO DE
+                            SERIE?** La bandera la decide la PUERTA (quien recibe sabe si el disco trae
+                            serial), NO el técnico. Enciende el concentrado de NS del guardado de la
+                            revisión: un NS por pieza aprobada y otro por cada devuelta.
+                            El control DICE su consecuencia — encenderlo cambia el trabajo del técnico,
+                            y quien recibe tiene que poder verlo antes de firmar la entrada. */}
+                        <div className="flex flex-col gap-1.5">
+                            <Etiqueta>Número de serie</Etiqueta>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => actualizar(i, { lleva_ns: !p.lleva_ns })}
+                                    disabled={disabled || esSinRevision}
+                                    aria-pressed={p.lleva_ns}
+                                    data-accion="lleva-ns"
+                                    className={claseChip(p.lleva_ns, disabled || esSinRevision)}
+                                >
+                                    <ScanLine className="mr-2 h-4 w-4" aria-hidden="true" />
+                                    {p.lleva_ns ? 'Sí lleva NS' : 'No lleva NS'}
+                                </button>
+                                <span className="text-[11.5px] text-muted-foreground">
+                                    {esSinRevision
+                                        ? 'La mercancía nueva no pasa por revisión: aquí no se piden NS.'
+                                        : p.lleva_ns
+                                          ? `En revisión se escaneará un NS por cada una de las ${cantidad} piezas.`
+                                          : 'La revisión no pedirá escaneos.'}
+                                </span>
                             </div>
                         </div>
                     </div>

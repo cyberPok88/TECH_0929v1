@@ -169,10 +169,17 @@ export const TEXTO_ESTADO_PAGO_NOTA: Record<EstadoPagoClave, string> = {
     cancelada: 'Cancelada',
 }
 
+/**
+ * ⭐ MEJORA 28 Sep 2026 — RELLENO SÓLIDO: el PAGO manda (lo físico informa), así que su estado
+ * se ve antes de leerse. Mismo mapa en las TRES superficies (listado · ficha · modal): el estado
+ * se lee igual en toda la app. La FORMA no cambia — sigue `rounded-full`: es estado, no control.
+ *   pagada `exito` (ya lo era) · parcial `encurso` · pendiente `avanzando` · vencida `bloqueado`
+ *   cancelada `neutro` — en TINTA, no en relleno: una nota cancelada está muerta, no en peligro.
+ */
 export const TONO_ESTADO_PAGO_NOTA: Record<EstadoPagoClave, TonoPildora> = {
-    vencida: 'peligro',
-    pendiente: 'advertencia',
-    parcial: 'info',
+    vencida: 'bloqueado',
+    pendiente: 'avanzando',
+    parcial: 'encurso',
     pagada: 'exito',
     cancelada: 'neutro',
 }

@@ -19,6 +19,7 @@ import { ArrowLeft, Pencil, Banknote, Ban, Truck, Printer } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { CLASE_THEAD_TABLA, Pildora } from '@/components/data-table'
+import type { TonoPildora } from '@/components/data-table'
 import { useCanAction } from '@/hooks/useCanAction'
 import { obtenerNotaCompra } from '@/lib/actions/notas-compra'
 // ⭐ MEJORA 28 Sep 2026 — la nota ya se IMPRIME con su plantilla (Guía 2.1): el tipo
@@ -29,6 +30,9 @@ import type { VariablesDocumento } from '@/lib/plantillas/motor'
 import { NotaCompraModal } from '@/components/compras/NotaCompraModal'
 import { RegistrarPagoNotaDialog } from '@/components/compras/RegistrarPagoNotaDialog'
 import { CancelarNotaCompraDialog } from '@/components/compras/CancelarNotaCompraDialog'
+// ⭐ MEJORA 40 (29 Sep 2026) — EL RESPALDO DEL PAPEL: si el tipo `nota_compra` no tiene
+// plantilla activa (o se desactiva), el PDF sale por acá en vez del mensaje de vacío.
+import { NotaCompraImprimible } from '@/components/compras/NotaCompraImprimible'
 import type { NotaCompraDetalle } from '@/types/notas-compra'
 import {
     TEXTO_ESTADO_FISICO,
@@ -81,6 +85,11 @@ export function NotaCompraFicha({
 
     const puedeEditar = useCanAction(RUTA, 'editar')
     const puedeEliminar = useCanAction(RUTA, 'eliminar')
+    // ⭐ La plantilla vive en el carril 2.1 y su RLS la deja SOLO al Administrador (decisión
+    //    del 28 Sep 2026): el botón se pinta para quien puede leerla de verdad. Sin este gate,
+    //    cualquier otro rol abriría un diálogo que dice «este documento todavía no tiene
+    //    plantilla» — un botón muerto, que es lo que el kit prohíbe.
+    const puedeImprimir = useCanAction('/dashboard/sistema/plantillas', 'ver')
 
     const cargar = useCallback(async () => {
         setCargando(true)
@@ -138,6 +147,9 @@ export function NotaCompraFicha({
     const pagable = !esCancelada && nota.saldo_pendiente > 0
     const cancelable = !esCancelada && nota.estado_fisico === 'por_recibir' && nota.saldo_pendiente === nota.total
 
+    /** Lo pagado: se deriva del saldo. UNA sola fórmula para la hoja del modal y para el papel. */
+    const pagado = Number((nota.total - nota.saldo_pendiente).toFixed(2))
+
     // ⭐ Los datos del PAPEL. La plantilla PINTA, no calcula (L6): el total, el pagado y el
     // sello llegan ya resueltos y formateados desde aquí, que es donde está la nota.
     // ⚠️ El membrete NO viaja: el kit lo resuelve solo desde `empresa_emisora` (P7).
@@ -163,8 +175,7 @@ export function NotaCompraFicha({
         // El sello lo decide quien imprime: Pagada · Cancelada · ninguno.
         sello: esCancelada ? 'Cancelada' : nota.estado_pago_clave === 'pagada' ? 'Pagada' : '',
         total: formatearMXN(nota.total),
-        /** Pagado = lo que la nota ya no debe. Se deriva del saldo para no sumar dos veces. */
-        pagado: formatearMXN(Number((nota.total - nota.saldo_pendiente).toFixed(2))),
+        pagado: formatearMXN(pagado),
         saldo: formatearMXN(nota.saldo_pendiente),
         notas: nota.notas ?? '',
         motivo_cancelacion: nota.motivo_cancelacion ?? '',
@@ -182,6 +193,228 @@ export function NotaCompraFicha({
             metodo: TEXTO_METODO_PAGO[p.metodo],
             referencia: p.referencia_bancaria ?? '',
         })),
+    }
+
+    // ── El ESTADO de pago: una sola lectura en las tres superficies (listado · ficha · modal).
+    // ⚠️ Cancelada GANA sobre el estado crudo — y su tono es `neutro` (tinta): está muerta,
+    //    no en problemas. El resto va en RELLENO SÓLIDO: el estado se ve, no se lee.
+    const estadoPagoTexto = esCancelada
+        ? 'Cancelada'
+        : nota.estado_pago_clave
+          ? TEXTO_ESTADO_PAGO_NOTA[nota.estado_pago_clave]
+          : (nota.estado_pago_nombre ?? '—')
+    const estadoPagoTono: TonoPildora = esCancelada
+        ? 'neutro'
+        : nota.estado_pago_clave
+          ? TONO_ESTADO_PAGO_NOTA[nota.estado_pago_clave]
+          : 'neutro'
+
+    // ── LAS ACCIONES: se declaran UNA vez y se pintan donde toque (la cabecera de la página o
+    //    el pie del modal). El RBAC es el mismo en las dos presentaciones.
+    const acciones = (
+        <>
+            {/* Imprimir es LEER — pero la PLANTILLA la lee solo el Administrador (RLS del carril
+                2.1). Sin ese permiso el botón no existe: no se ofrece lo que no se puede hacer. */}
+            {puedeImprimir && (
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() => setImprimiendo(true)}
+                >
+                    <Printer className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                    Imprimir nota
+                </Button>
+            )}
+            {puedeEditar && editable && (
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() => setModalEditar(true)}
+                >
+                    <Pencil className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                    Editar
+                </Button>
+            )}
+            {puedeEditar && pagable && (
+                <Button
+                    type="button"
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() => setDialogo({ tipo: 'pago' })}
+                >
+                    <Banknote className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                    Registrar pago
+                </Button>
+            )}
+            {puedeEliminar && cancelable && (
+                <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() => setDialogo({ tipo: 'cancelar' })}
+                >
+                    <Ban className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                    Cancelar nota
+                </Button>
+            )}
+        </>
+    )
+
+    /** Sin ninguna acción permitida no se pinta ni la barra: un pie vacío parece un error. */
+    const hayAcciones =
+        puedeImprimir || (puedeEditar && (editable || pagable)) || (puedeEliminar && cancelable)
+
+    // ── EL DOCUMENTO y los 3 diálogos: viven aquí para que las DOS presentaciones los compartan.
+    const dialogs = (
+        <>
+            {/* El documento: se resuelve al ABRIR (plantilla activa + membrete) y el PDF se
+                captura sobre el nodo del papel. Aquí no hay nada que cargar de antemano. */}
+            <DocumentoImprimible
+                tipo="nota_compra"
+                datos={datosImpresion}
+                nombreArchivo={nota.folio}
+                titulo={`Nota de compra ${nota.folio}`}
+                open={imprimiendo}
+                onOpenChange={setImprimiendo}
+                // ⭐ El respaldo: sin él, este PDF dependía 100% de que existiera una
+                //    plantilla activa (con el registro vacío salía un mensaje).
+                fallback={NotaCompraImprimible}
+            />
+            <NotaCompraModal
+                open={modalEditar}
+                onOpenChange={setModalEditar}
+                modo="editar"
+                nota={nota}
+                onGuardado={trasGuardado}
+            />
+            <RegistrarPagoNotaDialog
+                open={dialogo?.tipo === 'pago'}
+                onOpenChange={(a) => setDialogo(a ? { tipo: 'pago' } : null)}
+                nota={nota}
+                onGuardado={trasGuardado}
+            />
+            <CancelarNotaCompraDialog
+                open={dialogo?.tipo === 'cancelar'}
+                onOpenChange={(a) => setDialogo(a ? { tipo: 'cancelar' } : null)}
+                notas={nota ? [nota] : null}
+                onGuardado={trasGuardado}
+            />
+        </>
+    )
+
+    // ── Las clases del papel. En móvil la tabla se APILA (etiqueta por celda, `data-l`) porque
+    //    arrastrar en horizontal esconde justo el Costo; desde `sm` vuelve a ser tabla con tinta.
+    const TH_PAPEL = 'border border-black bg-neutral-100 px-2 py-1 text-[9.5px] font-bold uppercase tracking-[0.07em]'
+    const TD_NUM = 'mr-3 inline-block tabular-nums before:mr-1 before:text-[9.5px] before:uppercase before:tracking-[0.06em] before:text-neutral-600 before:content-[attr(data-l)] sm:mr-0 sm:table-cell sm:border sm:border-black sm:px-2 sm:py-1 sm:text-right sm:before:content-none'
+
+    // ⭐ MEJORA 28 Sep 2026 — EN EL MODAL, EL DOCUMENTO (hoja blanca, solo las tablas).
+    //    La ficha completa —estados, proveedor, historial de pagos, el aviso de inventario— es
+    //    de la PÁGINA: ahí se consulta el expediente. El modal es la nota que ya se va a pagar.
+    //    ⚠️ Fondo blanco y tinta: la excepción DECLARADA del papel (SPEC §2.1.d), la misma que
+    //       usa `DocumentoImprimibleDialog` para el nodo que captura el PDF. El cromo de la app
+    //       (tokens) queda fuera de la hoja.
+    if (enModal) {
+        return (
+            <div className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-col gap-0.5">
+                        <h1 className="font-display text-lg font-bold">Nota {nota.folio}</h1>
+                        <p className="text-xs text-muted-foreground">
+                            {TEXTO_ORIGEN_NOTA[nota.origen]} · {formatearFecha(nota.fecha_nota)}
+                        </p>
+                    </div>
+                    <Pildora texto={estadoPagoTexto} tono={estadoPagoTono} />
+                </div>
+
+                {/* La hoja no se estira: se queda en ~62ch con márgenes a los lados (en el
+                    teléfono no hay márgenes, porque ahí la hoja ES la pantalla). */}
+                <div className="rounded border border-border bg-white p-4 text-black sm:mx-auto sm:max-w-[620px] sm:p-6">
+                    <table className="w-full border-collapse text-[13px]">
+                        <thead className="hidden sm:table-header-group">
+                            <tr>
+                                <th className={`hidden sm:table-cell sm:w-[26px] text-left ${TH_PAPEL}`}>#</th>
+                                <th className={`text-left ${TH_PAPEL}`}>Descripción</th>
+                                <th className={`text-right sm:w-[56px] ${TH_PAPEL}`}>Cant.</th>
+                                <th className={`text-right sm:w-[88px] ${TH_PAPEL}`}>Costo</th>
+                                <th className={`text-right sm:w-[98px] ${TH_PAPEL}`}>Importe</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {nota.partidas.map((p, i) => (
+                                <tr
+                                    key={p.id}
+                                    className="block border-b border-black py-1.5 last:border-0 sm:table-row sm:border-0 sm:py-0"
+                                >
+                                    <td className="hidden tabular-nums sm:table-cell sm:border sm:border-black sm:px-2 sm:py-1 sm:text-right">
+                                        {i + 1}
+                                    </td>
+                                    <td className="block font-semibold sm:table-cell sm:border sm:border-black sm:px-2 sm:py-1 sm:font-normal">
+                                        {p.producto_nombre ?? p.descripcion ?? '—'}
+                                        {p.producto_codigo && (
+                                            <span className="ml-1 text-[11px] text-neutral-600">
+                                                {p.producto_codigo}
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td data-l="Cant." className={TD_NUM}>
+                                        {p.cantidad}
+                                    </td>
+                                    <td data-l="Costo" className={TD_NUM}>
+                                        {formatearMXN(p.costo_acordado)}
+                                    </td>
+                                    <td data-l="Importe" className={TD_NUM}>
+                                        {formatearMXN(p.subtotal_partida)}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+
+                    <div className="mt-3 flex justify-end">
+                        <table className="w-full border-collapse text-[13px] sm:w-auto sm:min-w-[250px]">
+                            <tbody>
+                                <tr>
+                                    <td className="px-2 py-1 text-neutral-700">Total de la nota</td>
+                                    <td className="px-2 py-1 text-right font-bold tabular-nums">
+                                        {formatearMXN(nota.total)}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td className="px-2 py-1 text-neutral-700">Pagado</td>
+                                    <td className="px-2 py-1 text-right tabular-nums">{formatearMXN(pagado)}</td>
+                                </tr>
+                                <tr>
+                                    <td className="border-t border-black px-2 py-1 font-bold">Saldo pendiente</td>
+                                    <td className="border-t border-black px-2 py-1 text-right font-bold tabular-nums">
+                                        {formatearMXN(nota.saldo_pendiente)}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* El motivo se queda: el modal ya no muestra estados, así que una nota cancelada
+                    sin su motivo sería una nota cancelada sin explicación. */}
+                {esCancelada && nota.motivo_cancelacion && (
+                    <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                        <b>Motivo de cancelación:</b> {nota.motivo_cancelacion}
+                    </p>
+                )}
+
+                {/* El pie del modal: en móvil los botones van apilados a ancho completo. */}
+                {hayAcciones && (
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">{acciones}</div>
+                )}
+
+                {dialogs}
+            </div>
+        )
     }
 
     return (
@@ -204,37 +437,11 @@ export function NotaCompraFicha({
                         {TEXTO_ORIGEN_NOTA[nota.origen]} · {formatearFecha(nota.fecha_nota)}
                     </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                    {/* Imprimir es LEER: no lleva permiso de edición, y el papel lleva este
-                        mismo dato aunque nadie pueda modificar la nota. */}
-                    <Button type="button" variant="outline" size="sm" onClick={() => setImprimiendo(true)}>
-                        <Printer className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                        Imprimir nota
-                    </Button>
-                    {puedeEditar && editable && (
-                        <Button type="button" variant="outline" size="sm" onClick={() => setModalEditar(true)}>
-                            <Pencil className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                            Editar
-                        </Button>
-                    )}
-                    {puedeEditar && pagable && (
-                        <Button type="button" size="sm" onClick={() => setDialogo({ tipo: 'pago' })}>
-                            <Banknote className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                            Registrar pago
-                        </Button>
-                    )}
-                    {puedeEliminar && cancelable && (
-                        <Button
-                            type="button"
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => setDialogo({ tipo: 'cancelar' })}
-                        >
-                            <Ban className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                            Cancelar nota
-                        </Button>
-                    )}
-                </div>
+                {hayAcciones && (
+                    <div className="flex flex-wrap gap-2">
+                        {acciones}
+                    </div>
+                )}
             </div>
 
             {/* Puente disabled → Entradas 1.6 */}
@@ -385,35 +592,7 @@ export function NotaCompraFicha({
                 </section>
             )}
 
-            {/* El documento: se resuelve al ABRIR (plantilla activa + membrete) y el PDF se
-                captura sobre el nodo del papel. Aquí no hay nada que cargar de antemano. */}
-            <DocumentoImprimible
-                tipo="nota_compra"
-                datos={datosImpresion}
-                nombreArchivo={nota.folio}
-                titulo={`Nota de compra ${nota.folio}`}
-                open={imprimiendo}
-                onOpenChange={setImprimiendo}
-            />
-            <NotaCompraModal
-                open={modalEditar}
-                onOpenChange={setModalEditar}
-                modo="editar"
-                nota={nota}
-                onGuardado={trasGuardado}
-            />
-            <RegistrarPagoNotaDialog
-                open={dialogo?.tipo === 'pago'}
-                onOpenChange={(a) => setDialogo(a ? { tipo: 'pago' } : null)}
-                nota={nota}
-                onGuardado={trasGuardado}
-            />
-            <CancelarNotaCompraDialog
-                open={dialogo?.tipo === 'cancelar'}
-                onOpenChange={(a) => setDialogo(a ? { tipo: 'cancelar' } : null)}
-                notas={nota ? [nota] : null}
-                onGuardado={trasGuardado}
-            />
+            {dialogs}
         </div>
     )
 }

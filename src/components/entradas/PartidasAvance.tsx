@@ -28,8 +28,9 @@ import { BotonDespliegue, Pildora } from '@/components/data-table'
 import { CLASE_CAJA_TABLA, CLASE_THEAD_TABLA, CLASE_TH_TABLA } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
-import { DocumentoImprimibleDialog } from '@/components/imprimibles'
+import { DocumentoImprimible } from '@/components/imprimibles'
 import { ActaRevisionImprimible } from '@/components/entradas/imprimibles/ActaRevisionImprimible'
+import { construirDatosActaRevision } from '@/components/entradas/imprimibles/datos-acta-revision'
 import {
     BarraAvance,
     formatearFechaEntrada,
@@ -96,7 +97,12 @@ function Hito({ etiqueta, fecha }: { etiqueta: string; fecha: string | null }) {
             />
             <span
                 className={cn(
-                    'font-mono text-[9.5px] uppercase tracking-[0.12em]',
+                    // ⭐ MEJORA 28 Sep 2026 — **PASE TIPOGRÁFICO (piso L14).** Esta etiqueta del timeline
+                    // medía **9.5px**: por debajo del piso, y 9.5 es la medida del CROMO de tabla
+                    // (`estilos-tabla.ts`), no la de una etiqueta de CONTENIDO. Se sube a la etiqueta
+                    // canónica de la SPEC §1.2 (`font-mono text-[11px] uppercase`) — el dato del hito, al
+                    // lado, ya iba a 11.5px, así que el par vuelve a leerse como un par.
+                    'font-mono text-[11px] uppercase tracking-[0.12em]',
                     hecha ? 'text-foreground/80' : 'text-muted-foreground/70'
                 )}
             >
@@ -329,14 +335,18 @@ export function PartidasAvance({
                     </Button>
                 </span>
             </div>
-            <DocumentoImprimibleDialog
+            {/* ⭐ MEJORA 41 (29 Sep 2026 · carril PLANTILLA) — la segunda puerta del acta pasa por el
+                punto de invocación: plantilla activa del tipo `acta_revision` si existe, y si no el
+                respaldo en código. Una sola plantilla, dos puertas. */}
+            <DocumentoImprimible
+                tipo="acta_revision"
+                datos={construirDatosActaRevision(entrada, partidas)}
                 open={imprimir}
                 onOpenChange={setImprimir}
                 titulo={`Acta de revisión · ${entrada.folio}`}
                 nombreArchivo={`acta-revision-${entrada.folio}`}
-            >
-                <ActaRevisionImprimible entrada={entrada} partidas={partidas} />
-            </DocumentoImprimibleDialog>
+                fallback={ActaRevisionImprimible}
+            />
             {/* ── Una sola tabla alineada, un solo encabezado ───────────────── */}
             <div className={cn(CLASE_CAJA_TABLA, 'shadow-premium-sm')}>
                 {/* ⚠️ `border-collapse`: sin él la tabla usa el default `separate`, y en el modelo
@@ -779,7 +789,11 @@ export function PartidasAvance({
                                                         </Button>
                                                     )}
                                                 {l.liberadas > 0 && (
-                                                    <span className="font-mono text-[9.5px] uppercase tracking-[0.09em] text-chart-4">
+                                                    // ⭐ MEJORA 28 Sep 2026 — mismo pase (piso L14): el
+                                                    // contador «n en limpieza» iba a 9.5px. Sube a la
+                                                    // etiqueta canónica (11 mono) y el número gana
+                                                    // `tabular-nums`, como todo dato que se cuenta.
+                                                    <span className="font-mono text-[11px] uppercase tracking-[0.09em] text-chart-4 tabular-nums">
                                                         {l.liberadas} en limpieza
                                                     </span>
                                                 )}

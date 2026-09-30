@@ -146,9 +146,15 @@ export const columnaIngresoIdentidad: ColumnaIngreso = {
     size: 340,
     render: (_v, i) => {
         const t = totalesDeIngreso(i.bandejas)
+        // ⭐ MEJORA 42-bis — el micro de identidad dice lo mismo que la píldora: si no hay tandas
+        // pero SÍ saldo, se nombra el saldo (antes decía «Sin tandas liberadas» y ocultaba 8 piezas).
+        const saldo = Math.max(0, (i.entrada?.piezas_aprobadas ?? 0) - (i.entrada?.piezas_liberadas ?? 0))
         const micro =
             i.bandejas.length === 0
-                ? [i.proveedor_nombre ?? '—', 'Sin tandas liberadas'].join(' · ')
+                ? [
+                      i.proveedor_nombre ?? '—',
+                      saldo > 0 ? `sin tandas · saldo ${saldo} pza` : 'Sin tandas liberadas',
+                  ].join(' · ')
                 : [
                       i.proveedor_nombre ?? '—',
                       `${t.partidas} ${t.partidas === 1 ? 'partida declarada' : 'partidas declaradas'}`,
@@ -175,7 +181,25 @@ export const columnaIngresoResumen: ColumnaIngreso = {
     size: 190,
     render: (_v, i) => {
         const t = totalesDeIngreso(i.bandejas)
-        if (t.tandas === 0) return <Pildora texto="Sin tandas" tono="neutro" />
+        /**
+         * ⭐ MEJORA 42-bis (29 Sep 2026) — **«Sin tandas» mentía.** El usuario vio la fila de
+         * `ING-0026` con esa píldora —que se lee como *«aquí no hay nada»*— y el botón **«Tomar para
+         * acondicionar»** activo al lado, y lo reportó como bug. No lo era el botón —es el **camino
+         * del DOCUMENTO**, el que existe justo para el ingreso que nadie liberó—: lo era la
+         * **etiqueta**, que escondía las **8 piezas de saldo** que esa acción se va a llevar.
+         * Ahora la fila dice **cuánto va a tomar**: `SALDO n PZA` (con aviso, porque hay trabajo) y
+         * `Sin tandas` solo cuando de verdad no queda mercancía —sólo el cierre de la etapa—.
+         * El saldo es el del camino clásico: `Σ aprobadas − Σ liberadas`, el MISMO número que coteja
+         * Almacén (por eso los dos caminos no se pisan).
+         */
+        const saldo = Math.max(0, (i.entrada?.piezas_aprobadas ?? 0) - (i.entrada?.piezas_liberadas ?? 0))
+        if (t.tandas === 0) {
+            return saldo > 0 ? (
+                <Pildora texto={`SALDO ${saldo} PZA`} tono="advertencia" />
+            ) : (
+                <Pildora texto="Sin tandas" tono="neutro" />
+            )
+        }
         return (
             <Pildora
                 texto={`${t.tandas} ${t.tandas === 1 ? 'TANDA' : 'TANDAS'} · ${t.piezas} PZA`}

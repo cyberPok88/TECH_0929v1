@@ -36,8 +36,17 @@ export function Topbar() {
     // Migaja de pan. Sale del MISMO menu[] que dibuja el Sidebar, no de partir el
     // pathname: '/dashboard/catalogos/productos' daría "catalogos", no "Catálogos".
     // El nombre bonito del módulo solo lo tiene la BD.
+    //
+    // ⭐ FIX 29 Sep 2026 (rutas hijas) — **además del match EXACTO, un submódulo cubre a sus
+    // descendientes.** Mismo criterio que `puedeVerPagina()` (auth-store) y `esRutaActiva()`
+    // (Sidebar), que ya lo hacían desde el 28 Ago 2026: sin esto, una página que declara su PROPIA
+    // ruta hija —y lo necesita para no heredar los botones del padre (`/alta/ns`)— perdía la migaja
+    // del módulo, y la única salida era declarar el `path` del padre y comerse un botón muerto.
     const modulo = useMemo(
-        () => menu.find((fila) => fila.href === currentPath)?.nombre_modulo ?? null,
+        () =>
+            menu.find(
+                (fila) => fila.href === currentPath || currentPath.startsWith(fila.href + '/')
+            )?.nombre_modulo ?? null,
         [menu, currentPath]
     )
 

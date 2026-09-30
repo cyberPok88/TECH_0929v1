@@ -27,8 +27,9 @@ import { ResultadoRevisionModal } from '@/components/entradas/ResultadoRevisionM
 import { PartidasRevision } from '@/components/entradas/PartidasRevision'
 import { AjusteDevModal } from '@/components/entradas/AjusteDevModal'
 import { LiberarAvanceModal } from '@/components/entradas/LiberarAvanceModal'
-import { DocumentoImprimibleDialog } from '@/components/imprimibles'
+import { DocumentoImprimible } from '@/components/imprimibles'
 import { ActaRevisionImprimible } from '@/components/entradas/imprimibles/ActaRevisionImprimible'
+import { construirDatosActaRevision } from '@/components/entradas/imprimibles/datos-acta-revision'
 import type { ToolbarAction } from '@/types/shell'
 import {
     columnaAvanceRevision,
@@ -413,17 +414,19 @@ export function RevisionCatalogo() {
                 entrada={resultado}
             />
             {/* ⭐ MEJORA 34 — el acta que imprime la toolbar de la página. Mismo documento que el de la
-                toolbar de detalles: una sola plantilla, dos puertas. */}
-            <DocumentoImprimibleDialog
+                toolbar de detalles: una sola plantilla, dos puertas.
+                ⭐ MEJORA 41 (29 Sep 2026 · carril PLANTILLA) — pasa por `DocumentoImprimible`: si el
+                tipo `acta_revision` tiene plantilla ACTIVA se imprime ESA; si no, el respaldo en
+                código. El papel ya no está hardcodeado ni lleva el membrete escrito a mano. */}
+            <DocumentoImprimible
+                tipo="acta_revision"
+                datos={detalle ? construirDatosActaRevision(detalle.entrada, detalle.partidas) : {}}
                 open={acta}
                 onOpenChange={setActa}
                 titulo={`Acta de revisión · ${detalle?.entrada.folio ?? ''}`}
                 nombreArchivo={`acta-revision-${detalle?.entrada.folio ?? 'entrada'}`}
-            >
-                {detalle ? (
-                    <ActaRevisionImprimible entrada={detalle.entrada} partidas={detalle.partidas} />
-                ) : null}
-            </DocumentoImprimibleDialog>
+                fallback={ActaRevisionImprimible}
+            />
         </>
     )
 }
