@@ -13,6 +13,7 @@ export const productoSchema = z
     .object({
         nombre: z.string().trim().min(1, 'El nombre es obligatorio')
             .max(200, 'El nombre es demasiado largo'),
+        modelo: z.string().trim().max(120, 'El modelo es demasiado largo'),
         descripcion: z.string().trim().max(2000, 'La descripción es demasiado larga'),
         codigo_barras: z.string().trim().max(64, 'El código de barras es demasiado largo'),
         id_categoria: z.string().trim().min(1, 'Elige la categoría del producto'),
@@ -88,12 +89,24 @@ export function validarAtributosContraEsquema(
     const errores: string[] = []
     for (const def of esquema) {
         const valor = atributos[def.clave]
-        const vacio = valor === undefined || valor === null || valor === ''
+        // ⭐ 06 Oct 2026 — un `multi` vale un CONJUNTO: un array vacío es «sin valor».
+        const esLista = Array.isArray(valor)
+        const vacio = valor === undefined || valor === null || valor === '' || (esLista && valor.length === 0)
         if (def.requerido && vacio) {
             errores.push(`Falta el atributo requerido "${def.etiqueta}".`)
             continue
         }
         if (vacio) continue
+        if (def.tipo === 'multi') {
+            if (!esLista) {
+                errores.push(`"${def.etiqueta}" espera una lista de valores.`)
+                continue
+            }
+            if (valor.some((m) => typeof m !== 'string' || m.trim() === '')) {
+                errores.push(`"${def.etiqueta}" tiene un miembro vacío.`)
+            }
+            continue
+        }
         if (def.tipo === 'number' && !Number.isFinite(Number(valor))) {
             errores.push(`"${def.etiqueta}" debe ser un número.`)
         }
@@ -113,14 +126,22 @@ export function atributosValidos(
 // decide la conversión: 'number' → número · 'select'/'text' → texto recortado.
 // Los vacíos se omiten. La Server Action usa el resultado para validar y guardar.
 export function convertirAtributosCrudos(
-    atributos: Record<string, string>,
+    atributos: Record<string, string | string[]>,
     esquema: AtributoEsquema[]
 ): Record<string, ValorAtributo> {
     const salida: Record<string, ValorAtributo> = {}
     for (const def of esquema) {
-        const crudo = (atributos[def.clave] ?? '').trim()
-        if (crudo === '') continue
-        salida[def.clave] = def.tipo === 'number' ? Number(crudo) : crudo
+        const crudo = atributos[def.clave]
+        // ⭐ 06 Oct 2026 — los `multi` viajan como ARRAY (el control de chips los togglea).
+        // Se recortan y se descartan los vacíos; el ORDEN no importa (lo fija la BD).
+        if (Array.isArray(crudo)) {
+            const miembros = crudo.map((s) => s.trim()).filter(Boolean)
+            if (miembros.length) salida[def.clave] = miembros
+            continue
+        }
+        const texto = (crudo ?? '').trim()
+        if (texto === '') continue
+        salida[def.clave] = def.tipo === 'number' ? Number(texto) : texto
     }
     return salida
 }

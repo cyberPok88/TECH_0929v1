@@ -40,6 +40,14 @@ export interface CapturaNsTandaProps {
     /** Para el encabezado: de qué entrada y partida se está hablando. */
     folio: string
     partida: number | null
+    /**
+     * ⭐ MEJORA 44 (30 Sep 2026) — **los NS que el LECTOR ya obtuvo**, para no volver a
+     * escanear lo que el disco ya dijo. Llegan como punto de partida y **siguen siendo
+     * editables**: un disco puede venir con el serial ilegible o con un NS que el firmware
+     * reporta mal, y el técnico tiene que poder corregirlo. Si un lado llega completo, ese
+     * paso se da por cerrado y la pantalla arranca en el que falta.
+     */
+    inicial?: NsTanda | null
     /** Se completa con las DOS listas (largo exacto) o se cancela: sin NS no hay guardado (D2). */
     onListo: (ns: NsTanda) => void
     onCancelar: () => void
@@ -48,10 +56,30 @@ export interface CapturaNsTandaProps {
 /** Los 2 s del aviso de cambio de paso. Una constante, no un número suelto: se cita en el texto. */
 const MS_BLOQUEO = 2000
 
-export function CapturaNsTanda({ pasa, noPasa, folio, partida, onListo, onCancelar }: CapturaNsTandaProps) {
-    const [paso, setPaso] = useState<1 | 2>(pasa > 0 ? 1 : 2)
-    const [nsPasa, setNsPasa] = useState<string[]>([])
-    const [nsNoPasa, setNsNoPasa] = useState<string[]>([])
+export function CapturaNsTanda({ pasa, noPasa, folio, partida, inicial, onListo, onCancelar }: CapturaNsTandaProps) {
+    /**
+     * ⭐ MEJORA 44 — el prellenado se RECORTA al tamaño esperado: si el lector trajo más NS
+     * que piezas hay algo mal, y meterlos igual haría que el servidor rechace el concentrado
+     * por no cuadrar (D2 lo exige exacto). Se recorta y el técnico ve qué falta.
+     */
+    const semillaPasa = (inicial?.pasa ?? []).slice(0, pasa)
+    const semillaNoPasa = (inicial?.noPasa ?? []).slice(0, noPasa)
+    /**
+     * ¿El prellenado ya cerró un lado entero? Entonces ese paso no hay que escanearlo.
+     * 🔴 CORREGIDO el 04 Oct 2026 (MEJORA 48) — **un lado con CERO piezas está CUBIERTO por
+     * definición**: no hay nada que escanear ahí. Antes decía `pasa > 0 && …` / `noPasa > 0 && …`,
+     * así que con **0 devueltas** el paso 2 daba «no cubierto» y el arranque **mandaba al técnico
+     * al paso 2 a escanear nada**. Medido: **1 disco al 100 % → 0 devueltas → la captura abría
+     * pidiendo los NS de las devueltas**. Con `0 ⇒ cubierto`, el arranque se queda donde **sí** hay
+     * algo que hacer (y si no hay nada en ninguno de los dos, el pie muestra la acción final y se
+     * cierra con un toque — no queda atrapado).
+     */
+    const paso1Cubierto = pasa === 0 || semillaPasa.length === pasa
+    const paso2Cubierto = noPasa === 0 || semillaNoPasa.length === noPasa
+
+    const [paso, setPaso] = useState<1 | 2>(paso1Cubierto && !paso2Cubierto ? 2 : 1)
+    const [nsPasa, setNsPasa] = useState<string[]>(semillaPasa)
+    const [nsNoPasa, setNsNoPasa] = useState<string[]>(semillaNoPasa)
     const [valor, setValor] = useState('')
     const [error, setError] = useState<string | null>(null)
     /**
@@ -66,8 +94,10 @@ export function CapturaNsTanda({ pasa, noPasa, folio, partida, onListo, onCancel
      * automático se consume UNA vez: al volver desde los devueltos, el paso 1 ya no teletransporta
      * (`bloqueado` es para el aviso), ofrece «Continuar a los devueltos». Antes, equivocarse en un NS
      * aprobado obligaba a cancelar la captura entera.
+     * ⭐ MEJORA 44 — si el prellenado ya cerró los aprobados, también arranca consumido: volver a
+     * un paso ya completo no tiene que teletransportar otra vez.
      */
-    const [paso1Cerrado, setPaso1Cerrado] = useState(false)
+    const [paso1Cerrado, setPaso1Cerrado] = useState(paso1Cubierto)
     const campo = useRef<HTMLInputElement>(null)
 
     useEffect(() => {
@@ -199,6 +229,24 @@ export function CapturaNsTanda({ pasa, noPasa, folio, partida, onListo, onCancel
                 </div>
 
                 <div className="flex flex-col gap-4 p-4">
+                    {/* ── ⭐ MEJORA 44 — DE DÓNDE SALIERON ESTOS NS ──
+                        Decir «ya están» sin decir de dónde sería tan peligroso como no decirlo: el
+                        técnico tiene que saber que el disco los reportó solo, y que igual puede
+                        corregirlos (un serial ilegible se escanea a mano). */}
+                    {(semillaPasa.length > 0 || semillaNoPasa.length > 0) ? (
+                        <p className="rounded-md border border-acc-entradas/40 bg-acc-entradas/5 px-3 py-2 text-[12.5px]">
+                            <b>Los NS ya vienen del lector de discos</b>
+                            {semillaPasa.length > 0 && semillaNoPasa.length > 0
+                                ? ' (los dos lados completos)'
+                                : semillaPasa.length > 0
+                                  ? ` (${semillaPasa.length} de los aprobados)`
+                                  : ` (${semillaNoPasa.length} de los devueltos)`}
+                            . El firmware del disco los reporta solo, así que <b>no hace falta
+                            escanearlos</b> — pero podés corregir cualquiera con el botón de borrar y
+                            volviéndolo a escanear, por si un disco viene sin serial legible.
+                        </p>
+                    ) : null}
+
                     {/* ── ① EL PEDIDO: qué se escanea, cuántos y de qué lado ── */}
                     <div
                         className={cn(

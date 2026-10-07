@@ -36,8 +36,6 @@ export interface Cliente {
     lista_precio_nombre: string | null
     id_canal_venta: string | null
     canal_venta_nombre: string | null
-    id_ruta_cobro: string | null
-    ruta_cobro_nombre: string | null
     id_vendedor_asignado: string | null
     vendedor_nombre: string | null
     // Crédito (D20)
@@ -104,6 +102,13 @@ export interface ClienteOpcion {
     codigo: string
     nombre_comercial: string
     rfc: string | null
+    /**
+     * ⭐ **ANEXIÓN 05 Oct 2026** (la pidió 1.8): el **plazo de crédito** del cliente.
+     * ⚠️ Es un `select` **de una columna que ya existía** — no toca la BD. Lo consume la
+     * confirmación de la nota para decir «Crédito · plazo N días» **sin una consulta extra**
+     * (el selector ya trae la fila completa). `null` = el cliente no maneja crédito.
+     */
+    dias_credito: number | null
 }
 
 // ── Evento de la bitácora (P8 · Historial) ─────────────────────────────────────
@@ -213,7 +218,6 @@ export interface ClienteFormData {
     id_tipo_cliente: string
     id_lista_precio: string
     id_canal_venta: string
-    id_ruta_cobro: string
     id_vendedor_asignado: string
     // Crédito
     tiene_credito: boolean
@@ -243,7 +247,6 @@ export function clienteFormDataVacio(): ClienteFormData {
         id_tipo_cliente: '',
         id_lista_precio: '',
         id_canal_venta: '',
-        id_ruta_cobro: '',
         id_vendedor_asignado: '',
         tiene_credito: false,
         limite_credito: '',
@@ -269,7 +272,6 @@ export function clienteAFormData(detalle: ClienteDetalle): ClienteFormData {
         id_tipo_cliente: detalle.id_tipo_cliente,
         id_lista_precio: detalle.id_lista_precio,
         id_canal_venta: detalle.id_canal_venta ?? '',
-        id_ruta_cobro: detalle.id_ruta_cobro ?? '',
         id_vendedor_asignado: detalle.id_vendedor_asignado ?? '',
         tiene_credito: detalle.tiene_credito,
         limite_credito: detalle.limite_credito === null ? '' : String(detalle.limite_credito),

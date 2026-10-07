@@ -28,8 +28,8 @@
 // (el mockup de Almacén llama a esto «tandas + saldo» en una sola cola, y descarta por L6 tener
 // el mismo trabajo en dos lugares). Anatomía y agrupación: `BandejasDeIngreso.tsx`.
 //
-// Diseño aprobado: `DOCS/design/entradas/liberacion-parcial-revision-acondicionamiento.html` §5 ·
-// `DOCS/design/entradas/almacen-hub-cotejo-por-tanda.html` §2 (opción B, agrupada por entrada).
+// Diseño aprobado: `DOCS/design/entradas/03-acondicionamiento/liberacion-parcial-revision-acondicionamiento.html` §5 ·
+// `DOCS/design/entradas/04-almacen/almacen-hub-cotejo-por-tanda.html` §2 (opción B, agrupada por entrada).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useCallback, useEffect, useMemo, useState } from 'react'

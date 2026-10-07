@@ -332,6 +332,16 @@ export function ProductoModal({ modo, producto, categorias, onCerrar, onExito }:
                                         placeholder="Ej. Disco duro Seagate 1TB SATA" />
                                 </div>
                                 <div className="grid gap-1.5">
+                                    <Label>Modelo</Label>
+                                    <Input value={form.modelo} onChange={(e) => setCampo('modelo', e.target.value)}
+                                        placeholder="Opcional — identifica la pieza (no entra en la huella)" />
+                                    <p className="text-xs text-muted-foreground">
+                                        El modelo distingue la pieza exacta <b>sin partir el stock</b>. Si buscás que
+                                        dos modelos distintos sean dos SKU, eso se decide en el esquema de la categoría
+                                        (atributo con «Identidad (huella)»).
+                                    </p>
+                                </div>
+                                <div className="grid gap-1.5">
                                     <Label>Código de barras</Label>
                                     <Input value={form.codigo_barras} onChange={(e) => setCampo('codigo_barras', e.target.value)}
                                         placeholder="Opcional (idempotencia del import)" />
@@ -586,6 +596,7 @@ function productoAFormulario(p: Producto): ProductoFormData {
     }
     return {
         nombre: p.nombre,
+        modelo: p.modelo ?? '',
         descripcion: p.descripcion ?? '',
         codigo_barras: p.codigo_barras ?? '',
         id_categoria: p.id_categoria ?? '',

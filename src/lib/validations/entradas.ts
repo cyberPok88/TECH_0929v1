@@ -19,7 +19,9 @@ export const partidaEntradaSchema = z.object({
         .string()
         .min(1, 'Elige la categoría de la partida.')
         .refine((v) => UUID_RE.test(v), 'Categoría inválida.'),
-    atributos: z.record(z.string(), z.string()),
+    // ⭐ 06 Oct 2026 — un atributo `multi` vale un CONJUNTO: `string[]`. El array viaja **sin
+    // ordenar** (lo canoniza la BD en `fn_valor_canonico`, `bd-productos.md §7.3`).
+    atributos: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
     cantidad_original: z
         .string()
         .min(1, 'Indica la cantidad.')

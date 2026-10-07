@@ -15,7 +15,7 @@
 // es la entrada y se despliega su contenido (`renderFilaExpandida` → `PartidasExpandidas` /
 // `PartidasRevision`), y el mecanismo es del **kit 0.8** — la «fila expandible» fue una PROMOCIÓN
 // del 20 Sep que salió de este mismo módulo. Para Almacén ya estaba decidido en el mockup
-// `DOCS/design/entradas/almacen-hub-cotejo-por-tanda.html` §2 (opción **B = recomendada**;
+// `DOCS/design/entradas/04-almacen/almacen-hub-cotejo-por-tanda.html` §2 (opción **B = recomendada**;
 // «hoy: dos vistas planas» = **descartada** por L6: dos lugares diciendo lo mismo es peor que uno).
 //
 // ⚠️ QUÉ ES UNA FILA HIJA (decisión del usuario + decisión 22.g ya medida): el **grupo

@@ -4,6 +4,9 @@
 // RECEPCION CATALOGO — Listado de entradas (Guía 1.6 · P2 · Smart)
 // Cola de trabajo del recepcionista: todas las entradas, filtrables por estado.
 // Paginación SERVIDOR. Acciones por fila: Ver (expediente) · Editar (recién_creada).
+// ⭐ MEJORA 05 Oct 2026 (usuario) — el **chevron YA NO DESPLIEGA la fila**: abre
+// `EntradaDetalleModal` con el mismo desglose (`PartidasExpandidas enModal`). La
+// tabla, sus columnas, sus filtros y su toolbar **no se tocan**.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -13,15 +16,16 @@ import { DataTable, crearColumnaAcciones } from '@/components/data-table'
 import type { EstadoTabla } from '@/components/data-table'
 import { usePageConfig } from '@/hooks/usePageConfig'
 import { useCanAction } from '@/hooks/useCanAction'
+import { useAyuda } from '@/components/ui/Ayuda'
 import type { ToolbarAction } from '@/types/shell'
 import { listarEntradas, listarPartidasEntrada } from '@/lib/actions/entradas'
 import type { Entrada, FiltrosEntradas, PartidaEntrada } from '@/types/entradas'
 import { RecepcionFilters, FILTROS_RECEPCION_DEFAULT, hayFiltrosRecepcion } from '@/components/entradas/RecepcionFilters'
 import { EntradaModal } from '@/components/entradas/EntradaModal'
 import { EntradaDetailModal } from '@/components/entradas/EntradaDetailModal'
+import { EntradaDetalleModal } from '@/components/entradas/EntradaDetalleModal'
 import { AjusteDevModal } from '@/components/entradas/AjusteDevModal'
 import { exportarEntradasCsv } from '@/components/entradas/exportar-entradas-csv'
-import { PartidasExpandidas } from '@/components/entradas/PartidasExpandidas'
 import { AvanceRevisionModal } from '@/components/entradas/AvanceRevisionModal'
 import { EtapasIngresoModal } from '@/components/entradas/EtapasIngresoModal'
 import { DocumentoImprimible } from '@/components/imprimibles'
@@ -74,6 +78,13 @@ export function RecepcionCatalogo() {
     // las 4 etapas en solo lectura, para que el puesto vea cómo evoluciona sin salir de su cola.
     const [etapasIngreso, setEtapasIngreso] = useState<Entrada | null>(null)
     /**
+     * ⭐ MEJORA 05 Oct 2026 (usuario) — **el chevron ya no despliega la fila: abre el MODAL**.
+     * Acá vive la entrada cuyo desglose se está mirando. El modal es presentacional (SPEC §5③):
+     * no carga nada ni decide permisos — la carga y las 4 acciones las sigue resolviendo este
+     * catálogo, que es donde están sus efectos.
+     */
+    const [detalleEntrada, setDetalleEntrada] = useState<Entrada | null>(null)
+    /**
      * ⭐ MEJORA 27 Sep 2026 (usuario) — **«falta el botón imprimir en la toolbar del shell»**: el papel
      * de Recepción es la **nota de entrada**, y la imprime la entrada cuyos **detalles están abiertos**
      * (el desglose avisa con `onExpandida`, mismo patrón que la toolbar de Revisión con el acta).
@@ -93,6 +104,14 @@ export function RecepcionCatalogo() {
     const puedeCrear = useCanAction(RUTA, 'crear')
     const puedeEditar = useCanAction(RUTA, 'editar')
     const puedeExportar = useCanAction(RUTA, 'exportar')
+
+    // ⭐ MEJORA 47 · AYUDAS DE PANTALLA (05 Oct 2026) — el `title` del «Imprimir nota» de la
+    // toolbar de la PÁGINA cuando hay un detalle abierto (lleva el folio). El otro mensaje —el de
+    // cuando NO hay detalle abierto— **no se cataloga**: es la BANDERA de un control apagado
+    // (vaciar el texto dejaría el botón mudo) ⇒ vive inline abajo.
+    const ayudaImprimirNota = useAyuda('recepcion.imprimir-nota-toolbar', {
+        folio: expandida?.folio ?? '',
+    })
 
     useEffect(() => {
         let activo = true
@@ -121,6 +140,15 @@ export function RecepcionCatalogo() {
         setEntradas(res.data ?? [])
         setTotal(res.total ?? 0)
         setEstadoTabla('idle')
+        // ⭐ MEJORA 05 Oct 2026 — EL DETALLE ABIERTO SE RE-APUNTA AL OBJETO FRESCO. Mientras el
+        // desglose vivía en la fila, la recarga lo refrescaba SOLA: el padre reemplazaba los
+        // objetos y el efecto de `PartidasExpandidas` (que depende de `entrada`) volvía a correr.
+        // El modal guarda su propia entrada, así que sin esto se quedaría mostrando el estado
+        // viejo justo después de ajustar la DEV y generar la nota (que es lo que acaba de pasar
+        // detrás). No cambia el alcance: es la MISMA fila, con el mismo objeto recargado.
+        setDetalleEntrada((prev) =>
+            prev ? ((res.data ?? []).find((e) => e.id === prev.id) ?? prev) : prev
+        )
     }, [filtros, pagina, tamano])
 
     const manejarFiltros = useCallback((patch: Partial<FiltrosEntradas>) => {
@@ -276,14 +304,14 @@ export function RecepcionCatalogo() {
             variant: 'outline',
             disabled: !expandida,
             title: expandida
-                ? `Nota de entrada de ${expandida.folio}, para firmar.`
+                ? ayudaImprimirNota
                 : 'Abre los detalles de una entrada para imprimir su nota de entrada.',
             onClick: () => {
                 if (expandida) void imprimirNota(expandida)
             },
         })
         return lista
-    }, [puedeCrear, puedeExportar, filtros, expandida, imprimirNota])
+    }, [puedeCrear, puedeExportar, filtros, expandida, imprimirNota, ayudaImprimirNota])
 
     const filtrosBarra = useMemo(
         () => <RecepcionFilters filtros={filtros} onFiltrosChange={manejarFiltros} contador={total} />,
@@ -326,25 +354,19 @@ export function RecepcionCatalogo() {
                     setTamano(n)
                     setPagina(1)
                 }}
-                // ⭐ PROMOCIÓN 20 Sep — primer consumidor de la fila expandible del kit:
-                // las partidas de la entrada se ven dentro de su fila.
-                // ⭐ MEJORA 22 Sep 2026: recibe la FILA completa (no solo el id) para mostrar
-                // la evolución (declaradas → DEV → final) y el timeline sin otra consulta.
-                // ⭐ MEJORA 34 (usuario, 27 Sep 2026) — **un detalle a la vez** (mismo acordeón que la
-                // cola de Revisión): el patrón de detalles de Entradas es uno solo en las dos colas.
-                unaFilaExpandida
-                renderFilaExpandida={(e) => (
-                    // ⭐ MEJORA 27 Sep 2026 — la toolbar del desglose lleva las puertas de la ENTRADA:
-                    // «Etapas del ingreso» (las 4 etapas, solo lectura) y la nota cuando ya existe.
-                    <PartidasExpandidas
-                        entrada={e}
-                        onAjustar={(x) => setAjuste(x)}
-                        onVerEtapas={(x) => setEtapasIngreso(x)}
-                        onVerNota={(x) => setNotaDetalle(x.id_nota ?? null)}
-                        onImprimir={(x) => void imprimirNota(x)}
-                        onExpandida={setExpandida}
-                    />
-                )}
+                // ⭐ MEJORA 05 Oct 2026 (usuario) — **EL CHEVRON YA NO DESPLIEGA LA FILA: ABRE EL
+                // MODAL** (carril PROMOCIÓN del kit: `DataTable.onDesplegar`). El desglose vivía
+                // dentro de la fila y competía con la lista: empujaba la tabla ≈260px con 1 partida
+                // y ≈1100px con 16. Acá solo se elige QUÉ entrada se mira; el contenido, la carga y
+                // las acciones los resuelve el `PartidasExpandidas` que hospeda el modal.
+                // ⚠️ Ya NO se pasa `renderFilaExpandida` (ni `unaFilaExpandida`): la tabla, sus
+                // columnas, sus filtros y su toolbar NO cambian — solo cambia a dónde lleva el
+                // chevron. El acordeón «un detalle a la vez» (MEJORA 34) queda cubierto por el
+                // propio modal: siempre hay UN detalle abierto.
+                onDesplegar={(e) => setDetalleEntrada(e)}
+                // ⭐ G4 · el nombre accesible del chevron dice el FOLIO, no el UUID de la fila
+                // («Desplegar ING-0001» en vez de «Desplegar la fila 94a2cbe9-…»).
+                etiquetaFila={(e) => e.folio}
                 // ⚠️ DESCARTADO 24 Sep 2026 (usuario): se probó rotular el control de despliegue
                 // («2 partidas» → «Ocultar») y se vio **exagerado** — pidió «mínimo como estaba,
                 // solo la flechita». El kit volvió a su chevron y aquí no se pasa etiqueta.
@@ -418,6 +440,27 @@ export function RecepcionCatalogo() {
                     if (!abierto) setEtapasIngreso(null)
                 }}
                 entrada={etapasIngreso}
+            />
+            {/* ⭐ MEJORA 05 Oct 2026 — **EL DESGLOSE DE LA ENTRADA, EN MODAL**: el chevron de la
+                fila ya no la despliega, abre esto (mismo contenido: `PartidasExpandidas enModal`).
+                Es PRESENTACIONAL: recibe la entrada elegida y reenvía las MISMAS 4 acciones que
+                resolvía la fila — ni un botón, ni un campo, ni un permiso nuevos.
+                `key` CALIFICADA (`detalle-…`, gate G6): la hermana `AjusteDevModal` sigue con el
+                placeholder SIN calificar (`'ninguna'`), así que un cuarto `key={entrada?.id ??
+                'ninguna'}` chocaría con ella con los dos modales cerrados → «Encountered two
+                children with the same key, ninguna» (defecto medido el 24 Sep 2026). */}
+            <EntradaDetalleModal
+                key={`detalle-${detalleEntrada?.id ?? 'ninguna'}`}
+                open={detalleEntrada !== null}
+                onOpenChange={(abierto) => {
+                    if (!abierto) setDetalleEntrada(null)
+                }}
+                entrada={detalleEntrada}
+                onAjustar={(x) => setAjuste(x)}
+                onVerEtapas={(x) => setEtapasIngreso(x)}
+                onVerNota={(x) => setNotaDetalle(x.id_nota ?? null)}
+                onImprimir={(x) => void imprimirNota(x)}
+                onExpandida={setExpandida}
             />
             {/* ⭐ MEJORA 27 Sep 2026 — el papel de Recepción, imprimible desde las DOS toolbars
                 (la del shell y la de detalles). Mismo documento que el expediente.

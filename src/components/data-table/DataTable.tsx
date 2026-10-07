@@ -8,6 +8,8 @@
 // rowKey obligatorio. renderRowActions (⚠️ deprecado-compat) → CRUD envuelve con
 // ProtectedAction/useCanAction (0.7); el patrón es crearColumnaAcciones (B5).
 // ⭐ REDISEÑO 02 Sep 2026: densidad por breakpoint (R2) · sticky (R1) · movil (R4) · alturaMaxima.
+// ⭐ PROMOCIÓN 05 Oct 2026: `onDesplegar` (el chevron abre lo que decida el CRUD, p. ej. un modal)
+//   + `etiquetaFila` (el nombre accesible del chevron dice el folio, no el UUID). Ambos opt-in.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import {
@@ -101,6 +103,10 @@ export function DataTable<TData>({
     renderFilaExpandida,
     // ⭐ MEJORA 34 (usuario) — un detalle a la vez (acordeón). Default: varias, como siempre.
     unaFilaExpandida = false,
+    // ⭐ PROMOCIÓN 05 Oct 2026 (Guía 1.6 Fase 1 → kit 0.8) — el chevron puede ABRIR UN MODAL en
+    // vez de desplegar la fila, y el CRUD puede darle al chevron el nombre de SU fila (el folio).
+    onDesplegar,
+    etiquetaFila,
     // ⭐ MEJORA 20 Sep 2026 — alineación de los DATOS (default: centrado)
     alineacionDatos = "centro",
 }: DataTableProps<TData>) {
@@ -472,10 +478,16 @@ export function DataTable<TData>({
     const rowModel = table.getRowModel()
     const isSorted = table.getState().sorting.length > 0
 
+    // ⭐ PROMOCIÓN 05 Oct 2026 — LA COLUMNA DEL CHEVRON EXISTE CON CUALQUIERA DE LAS DOS FORMAS:
+    // con `renderFilaExpandida` (la fila se despliega, como siempre) o con `onDesplegar` (el
+    // chevron abre lo que el CRUD decida — p. ej. un modal, Recepción 1.6). Antes se pintaba
+    // solo `if (renderFilaExpandida)`: dejar de pasarla escondía la columna «Detalles».
+    const conChevron = Boolean(renderFilaExpandida || onDesplegar)
+
     // ⭐ PROMOCIÓN 20 Sep 2026 — columnas totales (colSpan de la fila expandida)
     const totalColumnas =
         (enableRowSelection ? 1 : 0) +
-        (renderFilaExpandida ? 1 : 0) +
+        (conChevron ? 1 : 0) +
         (headerGroups[0]?.headers.length ?? 0) +
         (renderRowActions ? 1 : 0)
 
@@ -621,7 +633,7 @@ export function DataTable<TData>({
                 <thead>
                     {headerGroups.map((headerGroup) => (
                         <tr key={headerGroup.id}>
-                            {renderFilaExpandida && (
+                            {conChevron && (
                                 // ⭐ FIX 22 Sep 2026 (2ª iteración) — ETIQUETA VISIBLE.
                                 // Con el `<th>` vacío, la columna la dimensionaba el BOTÓN del
                                 // cuerpo (44px en móvil / 32px en escritorio), así que el
@@ -778,16 +790,39 @@ export function DataTable<TData>({
                                     // (0,1,0) y el tinte cubre la fila entera, no solo una columna.
                                     className={cn("group", expandida && "[&>td]:bg-primary-bg/50")}
                                 >
-                                    {renderFilaExpandida && (
+                                    {conChevron && (
                                         <td className={cn('w-10 bg-surface px-1 text-center', CLASE_TD_FILA)}>
                                             {/* ⭐ MEJORA 26 Sep 2026 — el MISMO `BotonDespliegue`
                                                 que usa la fila de PARTIDA en la tabla de detalle:
-                                                un solo gesto en los dos niveles. */}
+                                                un solo gesto en los dos niveles.
+                                                ⭐ PROMOCIÓN 05 Oct 2026 — con `onDesplegar` el
+                                                clic NO alterna la fila: se delega en el CRUD (que
+                                                abre su modal) y la fila queda quieta. El nombre
+                                                accesible sale de `etiquetaFila` (el folio), no del
+                                                `rowKey` — un UUID no le dice nada a nadie. */}
                                             <BotonDespliegue
                                                 abierto={expandida}
-                                                onAlternar={() => alternarExpandida(claveFila)}
-                                                sujeto={`la fila ${claveFila}`}
-                                                controles={`detalle-${claveFila}`}
+                                                // ⭐ PROMOCIÓN 05 Oct 2026 — con onDesplegar el chevron no despliega: ABRE el
+                                                // modal que decida el CRUD ⇒ se anuncia como diálogo y suelta el `aria-expanded`.
+                                                abreDialogo={Boolean(onDesplegar)}
+                                                onAlternar={() =>
+                                                    onDesplegar
+                                                        ? onDesplegar(row.original)
+                                                        : alternarExpandida(claveFila)
+                                                }
+                                                sujeto={
+                                                    etiquetaFila
+                                                        ? etiquetaFila(row.original)
+                                                        : `la fila ${claveFila}`
+                                                }
+                                                // `aria-controls` SOLO si hay una región que
+                                                // controlar: con `onDesplegar` la fila de detalle no
+                                                // se pinta, así que apuntaría a un `id` inexistente.
+                                                controles={
+                                                    renderFilaExpandida
+                                                        ? `detalle-${claveFila}`
+                                                        : undefined
+                                                }
                                                 className="mx-auto"
                                             />
                                         </td>

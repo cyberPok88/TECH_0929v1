@@ -62,7 +62,21 @@ export function ExistenciasCatalogo() {
         let activo = true
         void listarCategoriasYMarcas().then((res) => {
             if (!activo || !res.success || !res.data) return
-            setCategorias(res.data.categorias.map((c) => ({ valor: c.id, etiqueta: c.nombre })))
+            // ⭐ 06 Oct 2026 — «Familia › Tipo» (R9: el nombre es único POR PADRE, no global;
+            // espejo de ProductoFilters). Los dos niveles sirven como filtro: `listarExistencias`
+            // expande la Familia a sus Tipos en servidor.
+            const nombrePorId = new Map(res.data.categorias.map((c) => [c.id, c.nombre]))
+            setCategorias(
+                res.data.categorias.map((c) => {
+                    const familia = c.id_categoria_padre ? nombrePorId.get(c.id_categoria_padre) : null
+                    const etiqueta = familia
+                        ? `${familia} › ${c.nombre}`
+                        : c.id_categoria_padre
+                          ? `↳ ${c.nombre}`
+                          : c.nombre
+                    return { valor: c.id, etiqueta }
+                })
+            )
             setMarcas(res.data.marcas.map((m) => ({ valor: m.id, etiqueta: m.nombre })))
         })
         return () => {

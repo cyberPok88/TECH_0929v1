@@ -1,7 +1,8 @@
-'use client'
+﻿'use client'
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ALMACÉN HUB — aterrizaje del PUESTO de Almacén (Guía 1.6 · Fase 4)
+//                Guía 2.4 (05 Oct 2026): consume la ficha del KIT.
 //
 // El usuario (24 Sep 2026): *«cuando hablamos de un propio HUB es tipo una página con fichas
 // así que abran lo que es: las entradas que se deben cotejar para el flujo de ingreso, link o
@@ -11,22 +12,25 @@
 // **no** se carga la consulta más pesada del módulo — se muestran sus destinos y cada uno carga
 // solo lo suyo. V5: Ingresos/Recepciones · Productos · Movimientos.
 //
-// · Ficha I (patrón de `EntradasDashboard`): número fantasma + icono en cuadro + nombre/rol, con
-//   hover sólido en el acento del MÓDULO (`acc-entradas` — un dominio, un acento).
-// · La ficha 1 lleva el **conteo** de lo pendiente: todo número accionable es una puerta (L3).
+// ⭐ GUÍA 2.4 — LA FICHA SE FUE AL KIT. Este archivo tenía la tarjeta copiada inline: era la
+//   SEGUNDA copia del patrón (la primera era `EntradasDashboard`). Ahora usa `<FichaAcceso>`
+//   con `acento="entradas"`, y con esto la promoción queda CERRADA: el patrón vive en UN
+//   archivo de todo `src/`.
+// ⭐ El conteo de la cola entra por la RANURA `children` de la ficha: la ficha no sabe de
+//   colas, de tonos ni de carga — eso es de este puesto.
 // · Los destinos salen del `menu[]` ya recortado por permisos (no se pinta lo que el rol no ve).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { ArrowLeftRight, Package, PackageCheck, ScanLine } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 import { Pildora } from '@/components/data-table'
 import { FILTROS_ENTRADAS_DEFAULT } from '@/components/entradas/RecepcionFilters'
+import { FichaAcceso } from '@/components/ui/FichaAcceso'
 import { usePageConfig } from '@/hooks/usePageConfig'
 import { listarEntradas, listarTandas } from '@/lib/actions/entradas'
 import { useAuth } from '@/lib/stores/auth-store'
-import { cn } from '@/lib/utils'
 
 const RUTA = '/dashboard/entradas/alta'
 
@@ -39,7 +43,7 @@ export const HREF_NS = '/dashboard/entradas/alta/ns'
 interface FichaAlmacen {
     href: string
     numero: string
-    icono: typeof Package
+    icono: LucideIcon
     nombre: string
     rol: string
     /** Solo la ficha del cotejo lleva conteo: es la que tiene cola. */
@@ -71,14 +75,11 @@ const FICHAS: FichaAlmacen[] = [
     },
     /**
      * ⭐ MEJORA 29 Sep 2026 (usuario) — **LA 4ª FICHA: CONTROL DE NS.**
-     * *«en alta en almacén en el submenú poner una 4ta vista para el control de los NS … abra un botón
-     * buscar, y pedirá el NS y mostrará el resultado de lo que dijimos»*. Es la consulta del
-     * concentrado: de dónde vino un serial y qué pasó con él (garantía, devolución, o el proveedor
-     * intentando colar la pieza que ya se le devolvió).
+     * Es la consulta del concentrado: de dónde vino un serial y qué pasó con él (garantía,
+     * devolución, o el proveedor intentando colar la pieza que ya se le devolvió).
      *
      * ⚠️ **Corrige la frase del propio usuario del 24 Sep** —*«solo eso»*, los 3 destinos—: el
-     * puesto creció y el HUB lo dice. Se anota aquí porque esa frase quedó escrita en la cabecera de
-     * este archivo y en la ayuda del módulo.
+     * puesto creció y el HUB lo dice.
      */
     {
         href: HREF_NS,
@@ -137,64 +138,32 @@ export function AlmacenHub() {
 
     return (
         <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
-            {fichas.map((f) => {
-                const Icon = f.icono
-                return (
-                    <Link
-                        key={f.href}
-                        href={f.href}
-                        className={cn(
-                            'group relative flex min-h-[150px] flex-col gap-3.5 overflow-hidden rounded-lg border border-border bg-surface-2 p-[18px]',
-                            'touch-manipulation transition-all',
-                            'hover:-translate-y-0.5 hover:border-acc-entradas hover:bg-acc-entradas hover:shadow-premium-md',
-                            'active:translate-y-0 active:scale-[0.99]',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc-entradas focus-visible:ring-offset-2 focus-visible:ring-offset-background'
-                        )}
-                    >
-                        {/* Número fantasma — decorativo (el nombre lo lee el lector en el <h2>). */}
-                        <span
-                            aria-hidden="true"
-                            className="pointer-events-none absolute right-3.5 top-0.5 font-mono text-[68px] font-bold leading-none text-acc-entradas/15 transition-colors group-hover:text-primary-fg/25"
-                        >
-                            {f.numero}
-                        </span>
-
-                        <span className="relative grid size-10 shrink-0 place-items-center rounded-md border border-acc-entradas/30 bg-acc-entradas/10 text-acc-entradas transition-colors group-hover:border-primary-fg/30 group-hover:bg-primary-fg/20 group-hover:text-primary-fg">
-                            <Icon className="size-5" aria-hidden="true" />
-                        </span>
-
-                        <div className="relative mt-auto min-w-0">
-                            <h2 className="truncate font-display text-[13.5px] font-semibold tracking-wide text-foreground transition-colors group-hover:text-primary-fg">
-                                {f.nombre}
-                            </h2>
-                            {/* ⭐ MEJORA 43 (29 Sep 2026) — **pase tipográfico (piso L14):** el rol de la
-                                ficha medía 9.5px, que es la medida del CROMO de tabla
-                                (`estilos-tabla.ts`), no la de una etiqueta de CONTENIDO. Sube a la
-                                etiqueta canónica de la SPEC §1.2 (11 mono) — el resto de la ficha ya
-                                estaba en el piso. */}
-                            <span className="mt-0.5 block font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground transition-colors group-hover:text-primary-fg/85">
-                                {f.rol}
-                            </span>
-                            {f.cuentaCotejo && (
-                                <span className="mt-2.5 block">
-                                    {pendientes === null ? (
-                                        <Pildora texto="Leyendo la cola…" tono="neutro" />
-                                    ) : pendientes.tandas + pendientes.entradas === 0 ? (
-                                        <Pildora texto="Nada por cotejar" tono="listo" />
-                                    ) : (
-                                        <Pildora
-                                            texto={`${pendientes.tandas} ${pendientes.tandas === 1 ? 'tanda' : 'tandas'} · ${pendientes.piezas} pza${
-                                                pendientes.entradas > 0 ? ` + ${pendientes.entradas} entrada(s)` : ''
-                                            }`}
-                                            tono="advertencia"
-                                        />
-                                    )}
-                                </span>
-                            )}
-                        </div>
-                    </Link>
-                )
-            })}
+            {fichas.map((f) => (
+                <FichaAcceso
+                    key={f.href}
+                    href={f.href}
+                    numero={f.numero}
+                    icono={f.icono}
+                    titulo={f.nombre}
+                    eyebrow={f.rol}
+                    acento="entradas"
+                >
+                    {f.cuentaCotejo ? (
+                        pendientes === null ? (
+                            <Pildora texto="Leyendo la cola…" tono="neutro" />
+                        ) : pendientes.tandas + pendientes.entradas === 0 ? (
+                            <Pildora texto="Nada por cotejar" tono="listo" />
+                        ) : (
+                            <Pildora
+                                texto={`${pendientes.tandas} ${pendientes.tandas === 1 ? 'tanda' : 'tandas'} · ${pendientes.piezas} pza${
+                                    pendientes.entradas > 0 ? ` + ${pendientes.entradas} entrada(s)` : ''
+                                }`}
+                                tono="advertencia"
+                            />
+                        )
+                    ) : null}
+                </FichaAcceso>
+            ))}
         </div>
     )
 }

@@ -28,7 +28,10 @@ interface ProductoSustitutosTabProps {
 export function ProductoSustitutosTab({ producto }: ProductoSustitutosTabProps) {
     const [sustitutos, setSustitutos] = useState<ProductoOpcion[]>([])
     const [busqueda, setBusqueda] = useState('')
-    const [candidatos, setCandidatos] = useState<ProductoOpcion[]>([])
+    // ⚠️ Los candidatos son filas COMPLETAS (`listarProductos` → `Producto`): la opción
+    // `ProductoOpcion` se angostó a `id_categoria: string` con la cascada (06 Oct 2026) y
+    // `Producto.id_categoria` es NULLABLE en BD ⇒ el tipo local dice la verdad.
+    const [candidatos, setCandidatos] = useState<Producto[]>([])
     const [buscando, setBuscando] = useState(false)
     const [quitarDe, setQuitarDe] = useState<ProductoOpcion | null>(null)
 
@@ -71,7 +74,7 @@ export function ProductoSustitutosTab({ producto }: ProductoSustitutosTabProps) 
         }
     }
 
-    const agregar = async (candidato: ProductoOpcion) => {
+    const agregar = async (candidato: Producto) => {
         const res = await agregarSustituto(producto.id, candidato.id)
         if (!res.success) {
             toast.error(res.error ?? 'No se pudo agregar el sustituto.')

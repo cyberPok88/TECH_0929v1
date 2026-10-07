@@ -125,6 +125,17 @@ export function Topbar() {
 
                 <ThemeToggler />
 
+                {/* ⭐ 05 Oct 2026 — **EL OJO DE LAS DESCRIPCIONES SE RETIRÓ DE ACÁ.**
+                    Vivía al lado del tema (MEJORA 47) porque es una preferencia de UI del
+                    usuario. Pero al nacer la pantalla de Configuración (Guía 2.4), el detalle
+                    completo —categorías **y** textos— quedó ahí, y tenerlo también acá era
+                    **la misma configuración en dos lugares**. Decisión del dueño:
+                    *«esa configuración ahora está en Configuración»*.
+                    ⇒ El componente `shell/AyudasToggler.tsx` **se eliminó**.
+                    ⚠️ La preferencia NO se pierde: se sigue guardando en el mismo JSONB
+                    (`usuarios.preferencias.ayudas`) y se edita en
+                    `/dashboard/sistema/configuracion`. */}
+
                 {/* UserMenu (Guía 0.11): dropdown con Mi perfil + Cerrar sesión.
                     Sustituye el chip suelto del avatar y el botón LogOut de la 0.6. */}
                 <UserMenu />

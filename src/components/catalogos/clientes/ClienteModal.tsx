@@ -43,7 +43,6 @@ import {
     listarCanalesVenta,
     listarListasPrecio,
     listarMarcasComerciales,
-    listarRutasCobro,
     listarTiposCliente,
     listarVendedores,
 } from '@/lib/actions/catalogos'
@@ -88,7 +87,6 @@ export function ClienteModal({
     const [tipos, setTipos] = useState<OpcionUI[]>([])
     const [listas, setListas] = useState<OpcionUI[]>([])
     const [canales, setCanales] = useState<OpcionUI[]>([])
-    const [rutas, setRutas] = useState<OpcionUI[]>([])
     const [vendedores, setVendedores] = useState<OpcionUI[]>([])
     const [regimenes, setRegimenes] = useState<RegimenFiscalOpcion[]>([])
     const catalogoCargado = useRef(false)
@@ -181,10 +179,9 @@ export function ClienteModal({
             listarTiposCliente(),
             listarListasPrecio(),
             listarCanalesVenta(),
-            listarRutasCobro(),
             listarVendedores(),
             listarRegimenesFiscalesActivos(),
-        ]).then(([m, t, l, c, r, v, rg]) => {
+        ]).then(([m, t, l, c, v, rg]) => {
             const teno = (m.data ?? []).find((x) => x.clave === 'tenochtitlan')
             if (teno) marcaTenochtitlan.current = teno.id
             const publico = (t.data ?? []).find((x) => x.clave === 'PUBLICO')
@@ -193,7 +190,6 @@ export function ClienteModal({
             setTipos((t.data ?? []).map((x) => ({ id: x.id, etiqueta: x.nombre })))
             setListas((l.data ?? []).map((x) => ({ id: x.id, etiqueta: x.nombre })))
             setCanales((c.data ?? []).map((x) => ({ id: x.id, etiqueta: x.nombre })))
-            setRutas((r.data ?? []).map((x) => ({ id: x.id, etiqueta: x.nombre })))
             setVendedores((v.data ?? []).map((x) => ({ id: x.id, etiqueta: x.nombre })))
             setRegimenes(rg.data ?? [])
         })
@@ -371,7 +367,6 @@ export function ClienteModal({
                                     {(
                                         [
                                             ['id_canal_venta', 'Canal de venta', canales],
-                                            ['id_ruta_cobro', 'Ruta de cobro', rutas],
                                             ['id_vendedor_asignado', 'Vendedor (cartera)', vendedores],
                                         ] as const
                                     ).map(([campo, etiqueta, opciones]) => (

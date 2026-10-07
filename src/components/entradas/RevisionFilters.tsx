@@ -4,7 +4,7 @@
 // REVISION FILTERS — filtros de la COLA del técnico (Guía 1.6 · Fase 2 · Dumb)
 //
 // ⭐ MEJORA 24 Sep 2026 — diseño aprobado en
-// `DOCS/design/entradas/revision-puesto-tactil.html` §2.
+// `DOCS/design/entradas/02-revision/revision-puesto-tactil.html` §2.
 //
 // La cola de una ETAPA no se filtra como un catálogo:
 //   · «Cola» dice a QUÉ PARTE DEL FLUJO miras (A revisar · Por cerrar · Cerradas · Todas) y se

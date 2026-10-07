@@ -47,6 +47,9 @@ export function SelectorSkuHuella({
     const [creando, setCreando] = useState(false)
     const onChangeRef = useRef(onChange)
     const ultimaHuella = useRef('')
+    /** ⭐ FIX 05 Oct 2026 — candado de reentrada del alta. `creando` (estado) no alcanza: tres
+     *  clics seguidos en el mismo tick disparan tres veces antes de que React re-renderice. */
+    const creandoRef = useRef(false)
 
     useEffect(() => {
         onChangeRef.current = onChange
@@ -79,23 +82,38 @@ export function SelectorSkuHuella({
             toast.error('Falta categoría o marca para crear el producto.')
             return
         }
+        // ⭐ FIX 05 Oct 2026 — primera barrera: el candado del cliente (tres clics = una alta).
+        // La segunda barrera es `crearProductoRapido`, que ahora BUSCA por huella antes de crear.
+        if (creandoRef.current) return
+        creandoRef.current = true
         setCreando(true)
-        const nombre = [marcaNombre, ...Object.values(aTexto(atributos))].filter(Boolean).join(' ')
+        const nombreBase = [marcaNombre, ...Object.values(aTexto(atributos))].filter(Boolean).join(' ')
         const res = await crearProductoRapido({
             id_categoria: idCategoria,
             id_marca: idMarca,
-            nombre,
+            nombre: nombreBase,
             atributos: aTexto(atributos),
         })
+        creandoRef.current = false
         setCreando(false)
         if (!res.success || !res.data) {
             toast.error(res.error ?? 'No se pudo crear el producto.')
             return
         }
-        const nuevo: SkuOpcion = { id: res.data.id, sku: res.data.sku, nombre }
-        toast.success(`Producto ${nuevo.sku} creado (pendiente de enriquecimiento)`)
-        setOpciones((prev) => [...prev, nuevo])
-        onChangeRef.current(nuevo.id)
+        // `existente: true` ⇒ la acción encontró uno con la MISMA huella y lo reutilizó.
+        // Se dice tal cual: decir «creado» cuando en realidad se reutilizó es lo que hacía
+        // invisible el duplicado.
+        toast.success(
+            res.data.existente
+                ? `Ya existía ${res.data.sku} con esa huella — se reutiliza`
+                : `Producto ${res.data.sku} creado (pendiente de enriquecimiento)`
+        )
+        const id = res.data.id
+        const sku = res.data.sku
+        setOpciones((prev) =>
+            prev.some((p) => p.id === id) ? prev : [...prev, { id, sku, nombre: nombreBase }]
+        )
+        onChangeRef.current(id)
     }
 
     if (opciones.length === 0) {

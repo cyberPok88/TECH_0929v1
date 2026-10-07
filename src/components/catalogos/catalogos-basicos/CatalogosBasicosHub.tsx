@@ -6,7 +6,6 @@ import type { ClaveTabCatalogo } from '@/types/catalogos'
 import { CatalogoMiniCrud } from './CatalogoMiniCrud'
 import { configDeTab, type SolicitudNueva } from './catalogos-config'
 import { CategoriasTab } from './CategoriasTab'
-import { RutasTab } from './RutasTab'
 import { VendedoresTab } from './VendedoresTab'
 
 export interface HubCatalogosHandle {
@@ -30,7 +29,6 @@ const TABS: TabMeta[] = [
   { clave: 'canales_venta', etiqueta: 'Canales de venta', parte: 4 },
   { clave: 'marcas_comerciales', etiqueta: 'Marcas comerciales', parte: 4 },
   { clave: 'tipos_cliente', etiqueta: 'Tipos de cliente', parte: 5 },
-  { clave: 'rutas_cobro', etiqueta: 'Rutas de cobro', parte: 7 },
   { clave: 'listas_precios', etiqueta: 'Listas de precios', parte: 5 },
   { clave: 'vendedores', etiqueta: 'Vendedores', parte: 8 },
   { clave: 'marcas_producto', etiqueta: 'Marcas de producto', parte: 4 },
@@ -75,8 +73,6 @@ export function CatalogosBasicosHub({ onReady }: Props) {
           <TabsContent key={tab.clave} value={tab.clave} className="pt-4">
             {tab.clave === 'categorias' ? (
               <CategoriasTab solicitudNuevo={solicitudNuevo} />
-            ) : tab.clave === 'rutas_cobro' ? (
-              <RutasTab solicitudNuevo={solicitudNuevo} />
             ) : tab.clave === 'vendedores' ? (
               <VendedoresTab />
             ) : cfg ? (

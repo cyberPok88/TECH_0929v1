@@ -5,7 +5,9 @@
 // Carga obtenerProducto(id) y pinta las pestañas:
 //   · Ficha (todo el detalle + banner pendiente_enriquecimiento)
 //   · Sustitutos (placeholder — se activa en la Parte 7)
-//   · Últimos precios pagados / Kardex (placeholders disabled → 1.4/1.5)
+//   · ⭐ Ventas (ANEXIÓN 04 Oct 2026 — Guía 1.8 · Parte 6 · BLOQUE 1: dónde se fue este SKU)
+//   · Últimos precios pagados (placeholder disabled → 1.4)
+//   · Kardex (ANEXIÓN Guía 1.5: el libro de inventario)
 // Puentes a módulos futuros como botones disabled con tooltip (D18 · cero rutas
 // muertas). "Marcar enriquecido" limpia el flag (roles con editar).
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -21,6 +23,8 @@ import { AtributosChips } from '@/components/catalogos/productos/AtributosChips'
 import { ProductoSustitutosTab } from '@/components/catalogos/productos/ProductoSustitutosTab'
 // ANEXIÓN Guía 1.5 (17 Sep 2026): pestaña Kardex — lee el libro del dominio inventario
 import { ProductoKardexTab } from '@/components/catalogos/productos/ProductoKardexTab'
+// ANEXIÓN Guía 1.8 (04 Oct 2026): pestaña Ventas — dónde se fue este SKU
+import { ProductoVentasTab } from '@/components/catalogos/productos/ProductoVentasTab'
 import { useCanAction } from '@/hooks/useCanAction'
 import { usePageConfig } from '@/hooks/usePageConfig'
 import { completarEnriquecimiento, obtenerProducto } from '@/lib/actions/productos'
@@ -31,7 +35,7 @@ import { TEXTO_ESTADO_PRODUCTO, TONO_ESTADO_PRODUCTO, estadoDeProducto } from '@
 const RUTA_BASE = '/dashboard/catalogos/productos'
 
 interface TabDefinicion {
-    id: 'ficha' | 'sustitutos' | 'precios' | 'kardex'
+    id: 'ficha' | 'sustitutos' | 'precios' | 'kardex' | 'ventas'
     etiqueta: string
     disabled?: boolean
 }
@@ -43,6 +47,9 @@ const TABS: TabDefinicion[] = [
     // ANEXIÓN Guía 1.5 (17 Sep 2026): la pestaña Kardex se habilita — el libro de
     // inventario existe (movimientos_inventario) y esta guía construyó su lectura.
     { id: 'kardex', etiqueta: 'Kardex' },
+    // ⭐ ANEXIÓN Guía 1.8 (04 Oct 2026): la pestaña Ventas se habilita — el módulo
+    // existe y esta pantalla solo monta la consulta INVERSA (producto → notas).
+    { id: 'ventas', etiqueta: 'Ventas (1.8)' },
 ]
 
 type TabId = TabDefinicion['id']
@@ -169,6 +176,7 @@ export function ProductoFicha() {
                     <section className="rounded-md border border-border p-4">
                         <h2 className="mb-2 text-sm font-semibold uppercase text-muted-foreground">Identidad</h2>
                         <FilaDetalle etiqueta="Nombre" valor={producto.nombre} />
+                        <FilaDetalle etiqueta="Modelo" valor={producto.modelo} />
                         <FilaDetalle etiqueta="SKU" valor={<span className="font-mono">{producto.sku}</span>} />
                         <FilaDetalle etiqueta="Código de barras" valor={producto.codigo_barras} />
                         <FilaDetalle etiqueta="Descripción" valor={producto.descripcion} />
@@ -220,7 +228,6 @@ export function ProductoFicha() {
                                 { id: 'compras', label: 'Compras (1.4)' },
                                 { id: 'inventario', label: 'Inventario (1.5)' },
                                 { id: 'cotizaciones', label: 'Cotizaciones (1.7)' },
-                                { id: 'ventas', label: 'Ventas (1.8)' },
                             ].map((p) => (
                                 <Button key={p.id} variant="outline" size="sm" disabled title={`Disponible con ${p.label}`}>
                                     {p.label}
@@ -235,6 +242,9 @@ export function ProductoFicha() {
 
             {/* ANEXIÓN Guía 1.5: pestaña Kardex — movimientos del libro de inventario */}
             {tab === 'kardex' && <ProductoKardexTab producto={producto} />}
+
+            {/* ⭐ ANEXIÓN Guía 1.8 · Parte 6 · BLOQUE 1: dónde se fue ESTE sku */}
+            {tab === 'ventas' && <ProductoVentasTab productoId={producto.id} />}
         </div>
     )
 }

@@ -33,15 +33,25 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    /**
+     * ⭐ PROMOCIÓN 05 Oct 2026 (Guía 1.6 Entradas → kit 0.8 · `contrato agregado 05 Oct 2026`) —
+     * EL VELO DEL MODAL, POR MODAL. Hasta hoy el velo era UNO para toda la app (`bg-black/80`
+     * sin blur) porque acá se montaba `<DialogOverlay />` **sin props**: ningún modal podía
+     * cambiar el suyo. Con esta prop, el modal que lo necesite pide su velo
+     * (p. ej. `backdrop-blur-[2px]` en el detalle de la entrada) y los otros 20+ no cambian:
+     * `DialogOverlay` ya fusiona `className` con el suyo. Opt-in: sin la prop, igual que siempre.
+     */
+    overlayClassName?: string
+  }
+>(({ className, overlayClassName, children, ...props }, ref) => {
   // Remasterización: el modal se tiñe con el acento del módulo dueño de la ruta.
   const pathname = usePathname()
   const acento = acentoDeRuta(pathname)
 
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(

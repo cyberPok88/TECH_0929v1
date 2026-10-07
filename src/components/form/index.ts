@@ -62,4 +62,33 @@ export { SelectorProveedor } from './selectores/SelectorProveedor'
 // buscable de productos ACTIVOS; el contrato de dominio se importa del módulo dueño
 // 1.2 (`listarProductosActivos` — actions/productos · `ProductoOpcion` — types/productos).
 // (La 1.4 mantiene su copia local `listarProductosParaPartida` como duplicado anotado.)
+// ⭐ ANEXIÓN 06 Oct 2026 (CASCADA del selector · decisión del dueño) — el picker suma los
+// filtros de servidor Familia → Tipo → atributos `en_huella` (R8/R9). El export NO cambia
+// (mismo `value`/`onChange`): la anexión es de CONTRATO en el módulo dueño 1.2 —
+// `listarProductosActivos` pasa a `(filtros: FiltrosProductosActivos = {})` y nace
+// `listarCategoriasSelector` → `OpcionCategoriaSelector` (types/productos).
 export { SelectorProducto } from './selectores/SelectorProducto'
+
+// ⭐ PROMOCIÓN 01 Oct 2026 (8ª) — SelectorCliente sube a la 0.8 por el gate de componente
+// compartido del ciclo de Venta: lo piden **TRES** guías a la vez — **1.7 Cotizaciones**,
+// **1.8 Ventas** y **1.9 Cobros** (las tres en su alta). Selector buscable de clientes
+// ACTIVOS; el contrato de dominio se importa del módulo dueño **1.3**
+// (`listarClientesActivos` — actions/clientes L207 · `ClienteOpcion` — types/clientes).
+// ⭐ El encabezado de `actions/clientes.ts` dice literalmente «contrato 1.7/1.8/1.9»:
+//    el contrato YA existía y esperaba a este componente ⇒ **la promoción solo aporta la
+//    pieza de UI, CERO contrato nuevo** (espejo de SelectorProveedor y SelectorProducto).
+export { SelectorCliente } from './selectores/SelectorCliente'
+
+// ⭐ PROMOCIÓN 01 Oct 2026 (9ª) — PartidasGrid sube a la 0.8: es el grid genérico de
+// renglones de partida, y lo piden **TRES** guías — **1.7 Cotizaciones · 1.8 Ventas ·
+// 2.3 Devoluciones** (todas capturan partidas). Nace de la copia LOCAL de 1.4
+// (`components/compras/PartidasNotaGrid.tsx`), que **se queda como está** (duplicado
+// anotado · carril PROMOCIÓN: no se refactorizan CRUDs anteriores sin petición)
+// ⇒ es un `copy` con generalización, NO un `move`.
+// ⭐ El eje de la generalización NO son las columnas: es el **selector de producto**.
+//    La copia de 1.4 trae el suyo atado a `listarProductosParaPartida`; este grid
+//    **compone `SelectorProducto`** (Bloque 10, ya en el kit) y recibe las columnas
+//    DECLARATIVAS del consumidor (`columnas` · `crearFila` · `importeDe` ·
+//    `extraPorFila`). No hace precios, descuentos, impuestos ni NS: eso es del dominio.
+export { PartidasGrid } from './partidas/PartidasGrid'
+export type { ColumnaPartida, FilaPartidaBase, InfoProducto } from './partidas/PartidasGrid'

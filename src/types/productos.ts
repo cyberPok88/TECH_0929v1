@@ -1,15 +1,27 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // TIPOS DEL DOMINIO — PRODUCTOS (Guía 1.2)
-// Espejo LITERAL de public.productos (GUIAS/14/docs/bd-productos.md §1.1 · b2).
+// Espejo LITERAL de public.productos (GUIAS/14/docs/bd-productos.md §1.1 · b2) — de las columnas
+// que la APP LEE. ⚠️ `clave_huella` (32ª, `g14_a2_b2`) NO está acá a propósito: es una columna
+// CALCULADA por la BD (`tr_productos_clave_huella`) que sostiene el índice único
+// `uq_productos_clave_huella`; la app la consulta por el RPC `producto_por_clave_huella` cuando
+// necesita resolver un SKU. Meterla en `COLUMNAS` la volvería un campo más que puede viajar sin
+// motivo y desincronizarse del trigger.
 // Los nombres snake_case son contrato con la BD: renombrar uno guarda el dato
 // equivocado sin romper el build (CLAUDE.md, regla 4).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { TonoPildora } from '@/components/data-table'
+import type { AtributoEsquema } from '@/types/catalogos'
 
 // ── Atributos técnicos variables (D16) ─────────────────────────────────────────
 // Valores por producto (JSONB validado contra esquema_atributos de su categoría).
-export type ValorAtributo = string | number | boolean | null
+// ⭐ 06 Oct 2026 — un atributo `multi` vale un **CONJUNTO** (`string[]`): sockets del
+// disipador, puertos, conectores. ⚠️ **El cliente NO ordena**: manda el array tal como
+// lo eligió el usuario y **la BD lo canoniza** (`fn_valor_canonico`: normaliza, deduplica
+// y ordena). Es deliberado — si el orden lo fijara cada escritor, `crearProductoRapido`,
+// una importación o un arreglo SQL a mano producirían **DOS SKU del mismo conjunto** y el
+// `UNIQUE` no lo detectaría. Ver `GUIAS/14/docs/bd-productos.md §7.3`.
+export type ValorAtributo = string | number | boolean | null | string[]
 export type AtributosProducto = Record<string, ValorAtributo>
 
 // ── Fila del listado / ficha — lo que proyectan listar y obtener ───────────────
@@ -20,6 +32,10 @@ export interface Producto {
     sku: string
     codigo_barras: string | null
     nombre: string
+    /** ⭐ 05 Oct 2026 (`g14_a2_b1`) — identificación COMERCIAL del artículo. **NO entra en la
+     *  huella**: si entrara, dos modelos del mismo spec serían dos SKU del MISMO producto (la
+     *  huella agrupa, y el stock se partiría). Se busca por esta columna, no por `atributos`. */
+    modelo: string | null
     descripcion: string | null
     marca_fabricante: string | null
     id_marca: string | null
@@ -97,6 +113,8 @@ export interface ProductoFiltros {
 // Record<string,string> (todo input crudo) y se convierten por el tipo del esquema.
 export interface ProductoFormData {
     nombre: string
+    /** Modelo comercial (opcional). NO se captura como atributo: es columna propia. */
+    modelo: string
     descripcion: string
     codigo_barras: string
     id_categoria: string
@@ -114,14 +132,16 @@ export interface ProductoFormData {
     id_clave_unidad_sat: string
     imagen_url: string
     notas: string
-    /** Claves = claves del esquema_atributos de la categoría elegida */
-    atributos: Record<string, string>
+    /** Claves = claves del esquema_atributos de la categoría elegida
+     *  ⭐ 06 Oct 2026 — `string | string[]`: un `multi` vale un CONJUNTO (el array va SIN ordenar). */
+    atributos: Record<string, string | string[]>
 }
 
 /** Formulario vacío (alta). sku NUNCA se captura (autogenerado P-######). */
 export function productoFormDataVacio(): ProductoFormData {
     return {
         nombre: '',
+        modelo: '',
         descripcion: '',
         codigo_barras: '',
         id_categoria: '',
@@ -144,13 +164,47 @@ export function productoFormDataVacio(): ProductoFormData {
 }
 
 // ── Opción del selector de producto (contrato hacia 1.4–1.8 / sustitutos) ──────
+// ⭐ 06 Oct 2026 (CASCADA del selector) — la opción carga su CLASIFICACIÓN y sus
+// ATRIBUTOS porque el selector filtra en SERVIDOR Familia → Tipo → huella: sin
+// `id_categoria`/`atributos` no hay con qué discriminar. `atributos` son los de la fila
+// (`productos.atributos`, JSONB con números/booleanos posibles), y la comparación contra
+// la BD es TEXTUAL (`atributos->>clave`), igual que en `buscarProductosPorAtributos`.
 export interface ProductoOpcion {
     id: string
     sku: string
     nombre: string
+    /** Tipo (categoría hoja) — dueño del esquema y de la huella. */
+    id_categoria: string
+    /** Claves = claves del `esquema_atributos` del Tipo. ⭐ `multi` ⇒ `string[]`. */
+    atributos: Record<string, string | string[]>
+}
+
+// ── Filtros de la SA de opciones (`listarProductosActivos` · 1.2) ──────────────
+export interface FiltrosProductosActivos {
+    busqueda?: string
+    /** Tipo, o Familia (se expande a sus Tipos). */
+    id_categoria?: string
+    /** clave → valor; solo claves del esquema. ⭐ `multi` ⇒ `string[]`. */
+    atributos?: Record<string, string | string[]>
+}
+
+// ── Opción de la cascada de categorías (`listarCategoriasSelector` · 1.2) ──────
+// Familia = `id_categoria_padre` null (agrupa) · Tipo = con padre (identifica, R8).
+export interface OpcionCategoriaSelector {
+    id: string
+    nombre: string
+    id_categoria_padre: string | null
+    /** SOLO los `en_huella` del Tipo ([] en una Familia).
+     *  ⭐ 06 Oct 2026 — `tipo` se **deriva del `AtributoEsquema` canónico**. Antes era una
+     *  **tercera copia a mano** de la unión de tipos: al agregar `'multi'` al canónico, esta
+     *  quedó desactualizada y **la cazó `tsc`**. Derivarlo hace imposible esa deriva.
+     *  ⚠️ Puede venir `'multi'` ⇒ el valor es un CONJUNTO (`string[]`). */
+    atributos_huella: Pick<AtributoEsquema, 'clave' | 'etiqueta' | 'tipo' | 'opciones'>[]
 }
 
 // ── Sustituto en la lista de la ficha ──────────────────────────────────────────
+// ⚠️ Alias de `ProductoOpcion`: arrastra `id_categoria`/`atributos` a la pestaña de
+// sustitutos de la 1.2 (los lee de `listarSustitutos`, que ensancha su `select` igual).
 export type ProductoSustituto = ProductoOpcion
 
 // ── Clave SAT (buscador del formulario · prop tipo) ────────────────────────────

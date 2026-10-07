@@ -16,7 +16,7 @@
 //    el `ConfirmarAccionDialog` del kit — nunca un `AlertDialog` (su auto-cierre dejó el overlay
 //    colgado; está escrito en la cabecera del propio componente).
 //
-// Diseño aprobado: `DOCS/design/entradas/liberacion-parcial-revision-acondicionamiento.html` §4.
+// Diseño aprobado: `DOCS/design/entradas/03-acondicionamiento/liberacion-parcial-revision-acondicionamiento.html` §4.
 // ⚠️ La entrada NO cambia de estado: sigue en `en_revision`. Lo que se mueve es la mercancía.
 // ═══════════════════════════════════════════════════════════════════════════════
 

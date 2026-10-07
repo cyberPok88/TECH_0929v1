@@ -16,7 +16,7 @@
 //      de Recepción, no con un número suelto: con 200 piezas una barra por pieza no escala.
 //   · la huella resuelta (marca + atributos nuevos) va **debajo** de la declarada.
 //
-// Diseño aprobado: `DOCS/design/entradas/revision-puesto-tactil.html` §3.
+// Diseño aprobado: `DOCS/design/entradas/02-revision/revision-puesto-tactil.html` §3.
 // ⚠️ La huella de una partida puede ser VARIAS (una partida de 100 discos puede rendir 2TB y 4TB):
 // se pintan todas — elegir una sería mentir sobre lo aprobado.
 //

@@ -1,42 +1,26 @@
-'use client'
+﻿'use client'
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ENTRADAS DASHBOARD — aterrizaje del módulo (Guía 1.6 · remasterizado · Smart)
-//
-// ⭐ MEJORA 22 Sep 2026 (Fase 2 — fichas): el panel muestra el strip del flujo
-// (01→05) y una ficha por etapa. Cambios de esta pasada:
-//   · FUERA el par "Recibe / Entrega" (se veía cargado; el detalle vive en la guía
-//     y en el flujo, no en la tarjeta) y FUERA la píldora de texto "Entrar →".
-//   · Descripciones de una línea: la tarjeta informa, no explica.
-//   · UNA sola señal de acción: el círculo con flecha que se enciende en hover.
-//     La tarjeta entera es el enlace (Ley: no competir consigo misma).
-//   · Densidad del proyecto: alturas duales (h-11 táctil / md:h-8 escritorio),
-//     no una sola densidad impuesta.
-//
-// ⭐ MEJORA 22 Sep 2026 (Ficha I): nueva anatomía de la ficha de etapa —
-//   · Número FANTASMA gigante (68px, tenue) arriba-derecha (sustituye al eyebrow "Paso NN").
-//   · Icono en cuadro size-10 (estándar del kit) arriba.
-//   · Abajo: nombre + rol (se retiran la descripción y la flecha).
-//   · HOVER SÓLIDO: la ficha entera se pinta con el acento del MÓDULO y el texto pasa a
-//     `primary-fg`.
-//
-// ⭐ MEJORA 22 Sep 2026 (acento UNIFICADO): las fichas usan `acc-entradas`, el MISMO azul
-//   del strip y del sidebar. Antes tenían token propio (`--acc-entradas`, royal) y eso
-//   dejaba DOS azules del mismo módulo en la misma pantalla (215 vs 252, Δ37°): el ojo lo leía
-//   como incoherencia. El token propio se retiró (globals.css · tailwind.config ·
-//   SPEC_TOKENS_ACENTOS) — un dominio, un acento.
+//                        Guía 2.4 (05 Oct 2026): consume la ficha del KIT.
 //
 // La lista de etapas sale del menu[] (ya recortado por permisos_navegacion);
 // el ORDEN, el NOMBRE, el ROL y la DESCRIPCIÓN son estáticos (el flujo es fijo).
+//
+// ⭐ GUÍA 2.4 — LA FICHA SE FUE AL KIT. Este archivo tenía la tarjeta copiada inline
+//   (número fantasma, hover sólido, densidades duales). Ahora usa `<FichaAcceso>` con
+//   `acento="entradas"`: misma piel, un solo lugar que la mantiene. Es la PRIMERA de
+//   las dos copias que la promoción retira.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { Fragment } from 'react'
 import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
 
-import { usePageConfig } from '@/hooks/usePageConfig'
+import { FichaAcceso } from '@/components/ui/FichaAcceso'
 import { getIcon } from '@/config/icon-map'
-import { useAuth, menuAplanado } from '@/lib/stores/auth-store'
+import { usePageConfig } from '@/hooks/usePageConfig'
+import { menuAplanado, useAuth } from '@/lib/stores/auth-store'
 import { cn } from '@/lib/utils'
 
 const RUTA = '/dashboard/entradas'
@@ -62,6 +46,7 @@ const ETAPA_POR_HREF: Record<string, EtapaFlujo> = Object.fromEntries(
     ETAPAS_FLUJO.map((e) => [e.href, e])
 )
 
+/** El número fantasma, ya formateado (la ficha no impone formato). */
 function numero(orden: number): string {
     return String(orden).padStart(2, '0')
 }
@@ -89,8 +74,6 @@ export function EntradasDashboard() {
             {/* ── Strip del flujo ─────────────────────────────────────────── */}
             {/* Alturas duales: 44px táctil en móvil, 32px de escritorio (§11). */}
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface px-3.5 py-2.5">
-                {/* ⭐ MEJORA 43 — pase tipográfico (piso L14): la etiqueta de contenido del strip sube
-                    de 9.5px (medida del CROMO de tabla) a la etiqueta canónica de la SPEC §1.2. */}
                 <span className="mr-2 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
                     Flujo
                 </span>
@@ -109,23 +92,17 @@ export function EntradasDashboard() {
                                 <Link
                                     href={etapa.href}
                                     className={cn(
-                                        // ⭐ MEJORA 27 Sep 2026 — `rounded-md`: los chips de etapa son
-                                        // CONTROLES (navegan), no píldoras de estado.
+                                        // `rounded-md`: los chips de etapa son CONTROLES (navegan), no píldoras de estado.
                                         'inline-flex h-11 items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 text-[12px] font-semibold text-acc-entradas transition-colors md:h-8',
                                         'hover:bg-hover-background',
                                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc-entradas'
                                     )}
                                 >
-                                    <span
-                                        aria-hidden="true"
-                                        className="size-1.5 rounded-full bg-acc-entradas"
-                                    />
+                                    <span aria-hidden="true" className="size-1.5 rounded-full bg-acc-entradas" />
                                     {chip}
                                 </Link>
                             ) : (
-                                <span
-                                    className="inline-flex h-11 items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 text-[12px] font-semibold text-muted-foreground/60 md:h-8"
-                                >
+                                <span className="inline-flex h-11 items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 text-[12px] font-semibold text-muted-foreground/60 md:h-8">
                                     {chip}
                                 </span>
                             )}
@@ -134,50 +111,20 @@ export function EntradasDashboard() {
                 })}
             </div>
 
-            {/* ── Fichas de etapa ─────────────────────────────────────────── */}
-            {/* Ficha I: número fantasma + icono + nombre/rol, con hover sólido en el
-                acento del módulo (`acc-entradas`) — el mismo del strip. */}
+            {/* ── Fichas de etapa (pieza del KIT) ─────────────────────────── */}
             <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
                 {etapas.map((e) => {
                     const etapa = ETAPA_POR_HREF[e.href]
-                    const Icon = getIcon(e.icono_submodulo)
                     return (
-                        <Link
+                        <FichaAcceso
                             key={e.href}
                             href={e.href}
-                            className={cn(
-                                'group relative flex min-h-[150px] flex-col gap-3.5 overflow-hidden rounded-lg border border-border bg-surface-2 p-[18px]',
-                                'touch-manipulation transition-all',
-                                // Hover sólido: toda la ficha se pinta con el acento de la ficha.
-                                'hover:-translate-y-0.5 hover:border-acc-entradas hover:bg-acc-entradas hover:shadow-premium-md',
-                                // Se hunde al presionar: la tarjeta se comporta como botón.
-                                'active:translate-y-0 active:scale-[0.99]',
-                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc-entradas focus-visible:ring-offset-2 focus-visible:ring-offset-background'
-                            )}
-                        >
-                            {/* Número fantasma — decorativo (el nombre lo lee el lector en el <h2>). */}
-                            <span
-                                aria-hidden="true"
-                                className="pointer-events-none absolute right-3.5 top-0.5 font-mono text-[68px] font-bold leading-none text-acc-entradas/15 transition-colors group-hover:text-primary-fg/25"
-                            >
-                                {numero(etapa.orden)}
-                            </span>
-
-                            <span className="relative grid size-10 shrink-0 place-items-center rounded-md border border-acc-entradas/30 bg-acc-entradas/10 text-acc-entradas transition-colors group-hover:border-primary-fg/30 group-hover:bg-primary-fg/20 group-hover:text-primary-fg">
-                                <Icon className="size-5" aria-hidden="true" />
-                            </span>
-
-                            <div className="relative mt-auto min-w-0">
-                                <h2 className="truncate font-display text-[13.5px] font-semibold tracking-wide text-foreground transition-colors group-hover:text-primary-fg">
-                                    {e.nombre_submodulo}
-                                </h2>
-                                {/* ⭐ MEJORA 43 — pase tipográfico (piso L14): el rol de la ficha sube de
-                                    9.5px a la etiqueta canónica (11 mono). Mismo cambio en `AlmacenHub`. */}
-                                <span className="mt-0.5 block font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground transition-colors group-hover:text-primary-fg/85">
-                                    {etapa.rol}
-                                </span>
-                            </div>
-                        </Link>
+                            numero={numero(etapa.orden)}
+                            icono={getIcon(e.icono_submodulo)}
+                            titulo={e.nombre_submodulo}
+                            eyebrow={etapa.rol}
+                            acento="entradas"
+                        />
                     )
                 })}
             </div>

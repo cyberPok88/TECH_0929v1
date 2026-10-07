@@ -24,7 +24,6 @@ export function ClienteGeneralTab({ detalle }: { detalle: ClienteDetalle }) {
             <Campo etiqueta="Tipo de cliente" valor={detalle.tipo_cliente_nombre} />
             <Campo etiqueta="Lista de precios" valor={detalle.lista_precio_nombre} />
             <Campo etiqueta="Canal de venta" valor={detalle.canal_venta_nombre} />
-            <Campo etiqueta="Ruta de cobro" valor={detalle.ruta_cobro_nombre} />
             <Campo etiqueta="Vendedor (cartera)" valor={detalle.vendedor_nombre} />
             <Campo etiqueta="Crédito" valor={detalle.tiene_credito ? 'Con crédito' : 'Contado'} />
             <Campo etiqueta="Límite" valor={detalle.limite_credito !== null ? monto(detalle.limite_credito) : null} />

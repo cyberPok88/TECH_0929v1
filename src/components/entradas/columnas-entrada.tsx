@@ -357,7 +357,7 @@ export const columnaEstado: ColumnaEntrada = {
 // fila **le toca a él**, ni **desde cuándo** — y una entrada puede llevar 3 días ahí con el
 // mismo gris que una recién capturada (caso real `ING-0001`, 21 Sep; reporte del usuario:
 // *«puede decir así pero lleva 3 días ahí»*). Mientras la fila está EN COLA, el tono lo manda
-// la ANTIGÜEDAD. Umbrales y diseño: `DOCS/design/entradas/revision-puesto-tactil.html` §1.
+// la ANTIGÜEDAD. Umbrales y diseño: `DOCS/design/entradas/02-revision/revision-puesto-tactil.html` §1.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const DIA_MS = 86_400_000
@@ -481,7 +481,7 @@ export const columnaEstadoRevision: ColumnaEntrada = {
 //      pinta «info»: arranca en `advertencia` y a los ≥3 días pasa a `peligro` **y late**. Caso
 //      vivo: `ING-0001` lleva 3 días esperando ese cierre.
 // Se construye con el callback de quien la hospeda (patrón `crearColumnaDevolucion`).
-// Diseño: `DOCS/design/entradas/recepcion-puesto-tactil.html` §1.
+// Diseño: `DOCS/design/entradas/01-recepcion/recepcion-puesto-tactil.html` §1.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /** ¿La entrada está pendiente DE RECEPCIÓN? (revisada, sin nota → hay que ajustar y generar). */

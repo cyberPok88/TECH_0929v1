@@ -9,7 +9,7 @@
 //
 // Descartado NAVEGAR (se pierden filtros, página y la fila abierta) y descartados **cuatro** modales
 // (uno por etapa): el usuario eligió **una puerta — la toolbar de detalles — y un modal con las
-// etapas dentro**. Diseño aprobado: `DOCS/design/entradas/toolbar-detalles-etapas-recepcion.html`.
+// etapas dentro**. Diseño aprobado: `DOCS/design/entradas/01-recepcion/toolbar-detalles-etapas-recepcion.html`.
 //
 // La pieza clave es la **barra de etapas**: el mismo timeline que el desglose ya pinta al pie
 // (Recepción · Revisión · Acondicionamiento · Almacén), convertido en navegación — cada etapa dice su

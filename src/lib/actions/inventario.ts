@@ -43,7 +43,13 @@ interface FilaExistenciaCruda {
     lotes_abiertos: { id: string }[] | null
 }
 
-function estadoExistencia(stock: number, minimo: number): 'ok' | 'bajo_minimo' | 'sin_stock' {
+function estadoExistencia(
+    stock: number,
+    minimo: number
+): 'ok' | 'bajo_minimo' | 'sin_stock' | 'negativo' {
+    // ⚠️ `negativo` va ANTES de `<= 0`: si fuera después, nunca se alcanzaría
+    // (`-5 <= 0` ya retorna `sin_stock`) y el descuadre quedaría indistinguible.
+    if (stock < 0) return 'negativo'
     if (stock <= 0) return 'sin_stock'
     if (stock < minimo) return 'bajo_minimo'
     return 'ok'
@@ -71,15 +77,21 @@ function aFila(f: FilaExistenciaCruda): ExistenciaProducto {
     }
 }
 
-/** Opciones para los filtros (catálogos 1.0/1.2 — lectura). */
+/** Opciones para los filtros (catálogos 1.0/1.2 — lectura).
+ *  ⭐ 06 Oct 2026 — las categorías viajan con `id_categoria_padre` para que el filtro
+ *  «Categoría» muestre «Familia › Tipo»: el nombre es único POR PADRE, no global (R9),
+ *  y sin la Familia dos Tipos homónimos son indistinguibles. */
 export async function listarCategoriasYMarcas(): Promise<
-    RespuestaDato<{ categorias: { id: string; nombre: string }[]; marcas: { id: string; nombre: string }[] }>
+    RespuestaDato<{
+        categorias: { id: string; nombre: string; id_categoria_padre: string | null }[]
+        marcas: { id: string; nombre: string }[]
+    }>
 > {
     const supabase = await createClient()
     const [cat, marcas] = await Promise.all([
         supabase
             .from('categorias_producto')
-            .select('id, nombre')
+            .select('id, nombre, id_categoria_padre')
             .eq('es_activo', true)
             .order('nombre', { ascending: true }),
         supabase
@@ -93,7 +105,11 @@ export async function listarCategoriasYMarcas(): Promise<
     return {
         success: true,
         data: {
-            categorias: (cat.data ?? []).map((c) => ({ id: c.id, nombre: c.nombre })),
+            categorias: (cat.data ?? []).map((c) => ({
+                id: c.id,
+                nombre: c.nombre,
+                id_categoria_padre: c.id_categoria_padre,
+            })),
             marcas: (marcas.data ?? []).map((m) => ({ id: m.id, nombre: m.nombre })),
         },
     }

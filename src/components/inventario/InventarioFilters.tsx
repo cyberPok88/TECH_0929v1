@@ -22,9 +22,13 @@ export const FILTROS_EXISTENCIAS_DEFAULT: FiltrosExistencias = {
     estado: '',
 }
 
-const OPCIONES_ESTADO: { valor: 'ok' | 'bajo_minimo' | 'sin_stock'; etiqueta: string }[] = (
-    ['ok', 'bajo_minimo', 'sin_stock'] as const
-).map((clave) => ({ valor: clave, etiqueta: TEXTO_ESTADO_CONSUMO[clave] }))
+const OPCIONES_ESTADO: {
+    valor: 'ok' | 'bajo_minimo' | 'sin_stock' | 'negativo'
+    etiqueta: string
+}[] = (['ok', 'bajo_minimo', 'sin_stock', 'negativo'] as const).map((clave) => ({
+    valor: clave,
+    etiqueta: TEXTO_ESTADO_CONSUMO[clave],
+}))
 
 interface InventarioFiltersProps {
     filtros: FiltrosExistencias

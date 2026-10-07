@@ -11,7 +11,7 @@
 //
 // ⭐ MEJORA 31 (25 Sep 2026 · usuario) — UNA SOLA COLA, AGRUPADA POR INGRESO.
 // El usuario: *«lo mismo sería para entradas por cotejar, no?»* — y ya lo había decidido él mismo
-// el 24 Sep en el mockup `DOCS/design/entradas/almacen-hub-cotejo-por-tanda.html` §2:
+// el 24 Sep en el mockup `DOCS/design/entradas/04-almacen/almacen-hub-cotejo-por-tanda.html` §2:
 //
 //   · **B — Una cola agrupada por entrada (tandas + saldo)** · *«una fila por ingreso y dentro sus
 //     tandas. Un solo lugar para el trabajo del puesto, y el ingreso explica sus partes»* →
@@ -301,9 +301,16 @@ export function AltaCatalogo() {
             size: 200,
             render: (_v, i) => {
                 if (!puedeAprobar) return null
-                if (i.bandejas.length > 0) {
+                // ⭐ FIX 05 Oct 2026 — SÓLO las bandejas que aún se pueden cotejar.
+                // Antes se elegía la más antigua **sin mirar su estado**: la lista incluye las
+                // `confirmada` (para poder verlas), así que el botón abría el cotejo de una tanda
+                // **ya dada de alta**, dejaba resolver SKUs y crear productos… y recién al guardar
+                // reventaba con «La bandeja no está entregada al almacén» (guard de
+                // `confirmarAltaBandeja`). El botón no debe ofrecer lo que va a rechazar.
+                const pendientes = i.bandejas.filter((b) => b.estado === 'en_almacen')
+                if (pendientes.length > 0) {
                     // La más antigua primero (el orden de la cola lo manda su antigüedad, L1).
-                    const primera = i.bandejas.reduce((a, b) =>
+                    const primera = pendientes.reduce((a, b) =>
                         a.fecha_primera_liberacion <= b.fecha_primera_liberacion ? a : b
                     )
                     return (

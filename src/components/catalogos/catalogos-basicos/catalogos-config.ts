@@ -17,9 +17,15 @@ import { TIPOS_IMPUESTO } from '@/lib/validations/catalogos'
 export interface CatalogoCampo {
   name: string
   label: string
-  tipo: 'text' | 'number' | 'select' | 'switch'
+  /**
+   * ⭐ `segmentado` (ANEXIÓN 05 Oct 2026 · `g12_a4_b1`): **2 botones excluyentes** (`opciones`), no
+   * un desplegable — lo pidió el dueño para el tipo de ajuste de las listas de precios.
+   */
+  tipo: 'text' | 'number' | 'select' | 'switch' | 'segmentado'
   opciones?: { value: string; label: string }[]
   placeholder?: string
+  /** ⭐ Línea de ayuda debajo del control (la usa el `segmentado`). */
+  ayuda?: string
   /** Solo capturable en 'crear' (ej. clave). En 'editar' se muestra deshabilitado. */
   soloCrear?: boolean
 }
@@ -190,7 +196,15 @@ const marcasProductoConfig: CatalogoConfig = {
   acciones: { crear: crearMarcaProducto, editar: editarMarcaProducto, toggle: cambiarEstadoMarcaProducto },
 }
 
-const ajusteColumna = { key: 'porcentaje_ajuste', label: 'Ajuste', align: 'derecha' as const, render: (v: unknown) => `${Number(v) * 100}%` }
+/**
+ * ⚠️ La columna del «ajuste» **NO se llama igual en las dos tablas** (medido 05 Oct 2026):
+ *   · `tipos_cliente.porcentaje_ajuste`
+ *   · `listas_precios.porcentaje_descuento`
+ * Estaba **compartida** con una sola clave, así que la columna de las listas se pintaba vacía
+ * y el formulario no precargaba el valor. Cada catálogo declara la suya.
+ */
+const ajusteColumnaTipos = { key: 'porcentaje_ajuste', label: 'Ajuste', align: 'derecha' as const, render: (v: unknown) => `${Number(v) * 100}%` }
+const ajusteColumnaListas = { key: 'porcentaje_descuento', label: 'Descuento', align: 'derecha' as const, render: (v: unknown) => `${Number(v) * 100}%` }
 
 const tiposClienteConfig: CatalogoConfig = {
   clave: 'tipos_cliente',
@@ -200,7 +214,7 @@ const tiposClienteConfig: CatalogoConfig = {
   columnas: [
     { key: 'clave', label: 'Clave' },
     { key: 'nombre', label: 'Nombre' },
-    ajusteColumna,
+    ajusteColumnaTipos,
     activaColumna,
   ],
   campos: [
@@ -232,14 +246,32 @@ const listasPrecioConfig: CatalogoConfig = {
   columnas: [
     { key: 'clave', label: 'Clave' },
     { key: 'nombre', label: 'Nombre' },
-    ajusteColumna,
+    ajusteColumnaListas,
     { key: 'es_lista_default', label: 'Default', render: (v) => (v ? 'Sí' : '') },
     activaColumna,
   ],
   campos: [
     { name: 'clave', label: 'Clave', tipo: 'text', placeholder: 'BASE', soloCrear: true },
     { name: 'nombre', label: 'Nombre', tipo: 'text' },
-    { name: 'porcentajeAjustePorciento', label: 'Ajuste (%)', tipo: 'number', placeholder: '0' },
+    /**
+     * ⭐ EL CAMPO Y SUS 2 BOTONES (dueño, 05 Oct 2026 · `g12_a4_b1`):
+     *   · arriba, el **%** (0–100) — *«para ingresar un valor del 0 al 100»*;
+     *   · debajo, **«Descuento» / «Incremento»** — *«15 = 15% de descuento»* · *«5 = 5% de
+     *     incremento al precio base»*.
+     * ⚠️ El % **siempre es positivo** (el CHECK de la columna es `>= 0 AND < 1`): quién baja o sube
+     *    lo dice `tipo_ajuste`. Y ese tipo **entra en las 3 fórmulas de la nota** (R33 · R36).
+     */
+    { name: 'porcentajeAjustePorciento', label: 'Porcentaje (%)', tipo: 'number', placeholder: '0' },
+    {
+      name: 'tipoAjuste',
+      label: 'Efecto sobre el precio',
+      tipo: 'segmentado',
+      opciones: [
+        { value: 'descuento', label: 'Descuento' },
+        { value: 'incremento', label: 'Incremento' },
+      ],
+      ayuda: 'Descuento: el precio baja (base × (1 − %)). Incremento: el precio sube (base × (1 + %)).',
+    },
     { name: 'es_lista_default', label: 'Lista default', tipo: 'switch' },
     { name: 'es_activo', label: 'Activo', tipo: 'switch' },
   ],
@@ -248,7 +280,9 @@ const listasPrecioConfig: CatalogoConfig = {
   formDesdeRegistro: (f) => ({
     clave: String(f.clave ?? ''),
     nombre: String(f.nombre ?? ''),
-    porcentajeAjustePorciento: Number(f.porcentaje_ajuste ?? 0) * 100,
+    // ⚠️ La columna de ESTA tabla es `porcentaje_descuento` (no `porcentaje_ajuste`).
+    porcentajeAjustePorciento: Number(f.porcentaje_descuento ?? 0) * 100,
+    tipoAjuste: String(f.tipo_ajuste ?? 'descuento'),
     es_lista_default: Boolean(f.es_lista_default),
     es_activo: Boolean(f.es_activo),
   }),
@@ -297,7 +331,7 @@ const configs: Partial<Record<ClaveTabCatalogo, CatalogoConfig>> = {
   tipos_cliente: tiposClienteConfig,
   listas_precios: listasPrecioConfig,
   ubicaciones_almacen: ubicacionesAlmacenConfig,
-  // P7 rutas_cobro: custom (selector cobrador) · P8 vendedores: solo lectura
+  // P6 categorías: custom (árbol + editor de esquema) · P8 vendedores: solo lectura
 }
 
 export function configDeTab(clave: ClaveTabCatalogo): CatalogoConfig | undefined {

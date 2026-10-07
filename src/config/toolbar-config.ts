@@ -112,6 +112,15 @@ export const toolbarConfig: Record<string, ToolbarAction[]> = {
      */
     '/dashboard/entradas/alta/ns': [],
     '/dashboard/entradas/divergencias': [],
+    // ── ⭐ Guía 1.8 · Ventas (la ruta la añade el CRUD, patrón 2.0/2.1/2.2) ────────────
+    // ⚠️ La clave es el href EXACTO de `submodulos` — el mismo que `usePageConfig({ path })`.
+    //    Un `/dashboard/ventas` sin el submódulo **no matchea** y la toolbar sale vacía SIN error.
+    // ⚠️ `onClick` NO se declara aquí: el CRUD lo inyecta por `usePageConfig({ actions })`
+    //    (las acciones de aquí se SUMAN a las de la página — ver el hook).
+    '/dashboard/ventas/remisiones': [
+        { id: 'nuevo', label: 'Nueva nota', icon: Plus, accion: 'crear', variant: 'default' },
+        { id: 'exportar', label: 'Exportar CSV', icon: Download, accion: 'exportar', variant: 'outline' },
+    ],
 }
 
 /**

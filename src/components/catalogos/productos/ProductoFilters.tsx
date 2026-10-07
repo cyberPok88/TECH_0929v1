@@ -52,9 +52,16 @@ export function ProductoFilters({
         const subs = categorias
             .filter((c) => c.id_categoria_padre && c.es_activo)
             .sort((a, b) => a.nombre.localeCompare(b.nombre))
+        // ⭐ 05 Oct 2026 (`g12_a1_b1`): el nombre dejó de ser único GLOBAL — ahora es único POR PADRE.
+        // Un Tipo suelto («Fuentes de poder») puede repetirse en dos Familias ⇒ la etiqueta se compone
+        // como «Familia › Tipo» para que las dos opciones sean distinguibles.
+        const nombrePorId = new Map(categorias.map((c) => [c.id, c.nombre]))
         return [
             ...raices.map((r) => ({ valor: r.id, etiqueta: r.nombre })),
-            ...subs.map((s) => ({ valor: s.id, etiqueta: `↳ ${s.nombre}` })),
+            ...subs.map((s) => {
+                const familia = s.id_categoria_padre ? nombrePorId.get(s.id_categoria_padre) : null
+                return { valor: s.id, etiqueta: familia ? `${familia} › ${s.nombre}` : `↳ ${s.nombre}` }
+            }),
         ]
     }, [categorias])
 

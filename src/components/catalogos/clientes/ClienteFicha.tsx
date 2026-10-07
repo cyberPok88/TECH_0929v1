@@ -3,8 +3,9 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // CLIENTE FICHA — Expediente en página [id] (Guía 1.3 · Parte 7 · Smart)
 // Header + acciones (Editar · Suspender/Levantar) + pestañas:
-//   General · Fiscal · Direcciones · Contactos (activas)
-//   Historial → Parte 8 · Cotizaciones 1.7 · Ventas 1.8 · Cobros 1.9 (disabled)
+//   General · Fiscal · Direcciones · Contactos · Historial (activas)
+//   ⭐ Ventas · 1.8 (ANEXIÓN 04 Oct 2026 — Guía 1.8 · Parte 6 · BLOQUE 1: muestra SUS notas)
+//   Cotizaciones 1.7 · Cobros 1.9 (disabled — todavía no existen sus guías)
 // Carga ClienteDetalle (obtenerCliente — creado en P4). Editar reutiliza el
 // ClienteModal (modo editar); la suspensión usa SuspenderClienteDialog (P6).
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -24,6 +25,8 @@ import { ClienteFiscalTab } from '@/components/catalogos/clientes/ClienteFiscalT
 import { ClienteDireccionesTab } from '@/components/catalogos/clientes/ClienteDireccionesTab'
 import { ClienteContactosTab } from '@/components/catalogos/clientes/ClienteContactosTab'
 import { ClienteHistorialTab } from '@/components/catalogos/clientes/ClienteHistorialTab'
+// ANEXIÓN Guía 1.8 (04 Oct 2026): pestaña Ventas — lee las notas del dominio ventas
+import { ClienteVentasTab } from '@/components/catalogos/clientes/ClienteVentasTab'
 import { levantarSuspensionCliente, obtenerCliente } from '@/lib/actions/clientes'
 import { useCanAction } from '@/hooks/useCanAction'
 import {
@@ -159,9 +162,9 @@ export function ClienteFicha({ clienteId }: { clienteId: string }) {
                     <TabsTrigger value="cotizaciones" disabled title="Cotizaciones 1.7">
                         Cotizaciones · 1.7
                     </TabsTrigger>
-                    <TabsTrigger value="ventas" disabled title="Ventas 1.8">
-                        Ventas · 1.8
-                    </TabsTrigger>
+                    {/* ⭐ ANEXIÓN Guía 1.8 (04 Oct 2026): la pestaña Ventas se HABILITA —
+                        el módulo existe y esta pantalla solo monta su tabla de notas. */}
+                    <TabsTrigger value="ventas">Ventas · 1.8</TabsTrigger>
                     <TabsTrigger value="cobros" disabled title="Cobros 1.9">
                         Cobros · 1.9
                     </TabsTrigger>
@@ -182,11 +185,14 @@ export function ClienteFicha({ clienteId }: { clienteId: string }) {
                 <TabsContent value="historial" className="pt-3">
                     <ClienteHistorialTab clienteId={detalle.id} />
                 </TabsContent>
+                {/* ⭐ ANEXIÓN Guía 1.8 · Parte 6 · BLOQUE 1: las notas de ESTE cliente */}
+                <TabsContent value="ventas" className="pt-3">
+                    <ClienteVentasTab clienteId={detalle.id} />
+                </TabsContent>
             </Tabs>
 
             <p className="rounded-md border border-border/60 bg-surface/30 px-3 py-2 text-xs text-muted-foreground">
-                Los documentos (Cotizaciones/Ventas/Cobros) se habilitan cuando existan las guías
-                1.7/1.8/1.9.
+                Las cotizaciones (1.7) y los cobros (1.9) se habilitan cuando existan sus guías.
             </p>
 
             {/* ⚠️ Instancias SIEMPRE montadas (Radix). */}

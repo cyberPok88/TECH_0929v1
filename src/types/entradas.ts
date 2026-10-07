@@ -433,7 +433,9 @@ export interface CausaDivergencia {
 export interface PartidaEntradaForm {
     id: string // '' = nueva
     id_categoria: string // UUID del catálogo (select) — nunca texto libre
-    atributos: Record<string, string> // en_huella capturados en recepción (clave → valor)
+    // ⭐ 06 Oct 2026 — `string | string[]`: un atributo `multi` vale un CONJUNTO y viaja como
+    // ARRAY **sin ordenar** (lo canoniza la BD, `fn_valor_canonico`).
+    atributos: Record<string, string | string[]> // en_huella capturados en recepción (clave → valor)
     cantidad_original: string
     costo_acordado: string
     /**
@@ -493,9 +495,10 @@ export interface FiltrosEntradas {
  *  NO se usa "lote" para la revisión: el avance se guarda por PARTIDA. */
 export interface PiezaRevision {
     id_partida_entrada: string
-    /** ⭐ La REVISIÓN captura la marca + atributos (huella); NO el SKU. */
+    /** ⭐ La REVISIÓN captura la marca + atributos (huella); NO el SKU.
+     *  ⭐ 06 Oct 2026 — un `multi` vale un CONJUNTO (`string[]`). */
     id_marca: string
-    atributos: Record<string, string>
+    atributos: Record<string, string | string[]>
     resultado: 'PASA' | 'NO_PASA'
     id_motivo?: string
     porcentaje_salud?: number
@@ -518,6 +521,57 @@ export interface NsTanda {
     noPasa: string[]
 }
 
+/**
+ * ⭐ MEJORA 44 (30 Sep 2026) — **la LECTURA del disco** (SMART + salud) que el técnico obtuvo al
+ * capturar la pieza. Es **evidencia append-only**: viaja con la tanda y se escribe en
+ * `lecturas_disco` en el MISMO acto que las piezas y los NS.
+ * ⚠ La salud NO la calcula la app: viene de **HDSentinel** (`fuente: 'hdsentinel'`) y `apto` es la
+ * regla del taller (**puntaje === 100**). Las horas **no deciden: valúan**.
+ */
+export interface LecturaEntrada {
+    /** NS del **FIRMWARE** — el que manda. Es la llave contra `numeros_serie.ns`. */
+    ns: string
+    /** El NS que reporta Windows (en USB viene en ceros): se guarda como evidencia. */
+    ns_windows?: string | null
+    id_partida_entrada: string
+    /** La marca de la huella de esa pieza (la que el técnico confirmó). */
+    id_marca?: string | null
+    lun?: number | null
+    disco_fisico?: number | null
+    bahia?: string | null
+    modelo?: string | null
+    firmware?: string | null
+    capacidad_gb?: number | null
+    rpm?: number | null
+    interfaz?: string | null
+    es_nvme?: boolean
+    horas_uso?: number | null
+    encendidos?: number | null
+    temperatura_c?: number | null
+    salud_veredicto?: string | null
+    salud_puntaje?: number | null
+    salud_en_falla?: boolean
+    salud_motivos?: string[]
+    /** La regla en vigor al momento de leer: hoy `salud_puntaje === 100`. */
+    apto?: boolean | null
+    /**
+     * ⭐ MEJORA 44 (30 Sep 2026) — **si esa salud PODÍA DECIDIR.**
+     * `apto` dice «dio 100»; esto dice «ese número salió de HDSentinel o del propio disco (NVMe), NO
+     * de la fórmula del agente, que arranca en 100». Sin aval, la salud **no manda una devolución**:
+     * el servidor la rechaza y el técnico decide con un motivo a mano.
+     */
+    apto_para_decidir?: boolean | null
+    /** Inverso de `apto_para_decidir`: la pieza se registró para que la decida el técnico. */
+    requiere_revision?: boolean | null
+    sectores_reasignados?: number | null
+    sectores_pendientes?: number | null
+    sectores_no_corregibles?: number | null
+    errores_crc?: number | null
+    motor?: string | null
+    /** La lectura cruda del motor (evidencia). */
+    smart_raw?: unknown
+}
+
 /** Avance de revisión de UNA partida (las piezas que el técnico firma al guardar). */
 export interface AvanceRevisionInput {
     id_entrada: string
@@ -528,6 +582,12 @@ export interface AvanceRevisionInput {
      * Sin `ns` la acción cae al respaldo legado (piezas con `ns` propio).
      */
     ns?: NsTanda
+    /**
+     * ⭐ MEJORA 44 — la **lectura del disco** de cada pieza capturada con el lector.
+     * Es **opcional a propósito**: si el puesto no tiene el agente, la revisión se guarda igual
+     * (sin evidencia) — el lector **nunca bloquea** el trabajo.
+     */
+    lecturas?: LecturaEntrada[]
 }
 
 export interface ResultadoRevision {
@@ -892,4 +952,40 @@ export interface CategoriaCapturable {
     id: string
     nombre: string
     esquema: AtributoEsquema[]
+    /**
+     * ⭐ MEJORA 44 (30 Sep 2026) — **si esta categoría se revisa con el LECTOR DE DISCOS**.
+     * Vive en `categorias_producto.requiere_lector` (migración `g18_m44_requiere_lector_categorias`):
+     * TRUE en HDD · SSD · M.2. La **RAM no tiene SMART** → FALSE y el modal queda como antes.
+     *
+     * ⚠️ Antes el modal lo decidía con una regex sobre el NOMBRE (`/hdd|ssd|m\.2|disco/i`): renombrar
+     * la categoría APAGABA el lector **en silencio**. El nombre no es lógica (regla 4).
+     */
+    requiere_lector: boolean
+}
+
+// ── Categoría del modal de entrada (LAS 18 · con su familia y su flujo) ─────────
+/**
+ * ⭐ 05 Oct 2026 — el modal de Recepción necesita **el catálogo entero**, no solo las
+ * capturables: el flujo de **mercancía nueva** ofrece **las 18 activas** (Familias y Tipos)
+ * y el de **mercancía NO nueva**, sus 4 (`requiere_revision_pieza`).
+ *
+ * Medido antes de esto: `listarCategoriasCapturables()` devuelve **11** y **ninguna raíz** ⇒
+ * el control de categoría caía al `<select>` (la regla de la casa es chips hasta 4 opciones)
+ * y el flujo nueva **no podía ofrecer las Familias** (Periféricos · Impresoras · CCTV…).
+ *
+ * ⚠️ El esquema es el **efectivo**: propio, o el de la Familia si el Tipo no define uno (regla D16).
+ */
+export interface CategoriaEntrada extends CategoriaCapturable {
+    /** La Familia de la que cuelga (`null` = es raíz). Agrupa la lista del flujo nueva. */
+    id_categoria_padre: string | null
+    /** Si esta categoría tiene hijas activas: la vuelve encabezado de grupo **y** opción. */
+    tiene_hijas: boolean
+    /**
+     * 🔴 **La marca del flujo de mercancía NO nueva** (`categorias_producto.requiere_revision_pieza`,
+     * migración `g12_a3_b1` · 05 Oct 2026): TRUE en **HDD · RAM · SSD · M.2**.
+     *
+     * Es un **DATO, no un nombre**: el proyecto ya pagó el defecto de comparar `nombre === 'HDD'`
+     * (renombrar una categoría rompía la función en silencio).
+     */
+    requiere_revision_pieza: boolean
 }

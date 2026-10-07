@@ -149,7 +149,7 @@ export function RevisionCatalogo() {
     // ⭐ MEJORA 24 Sep 2026 (Fase 2 · Revisión) — LA ACCIÓN, EN VERSIÓN TÁCTIL.
     // ⚠️ Se RETIRA `crearColumnaAcciones` (iconos + menú ⋯) de esta fase: en un puesto de dedo el
     // ⋯ obliga a apuntar a 24px y elegir a ciegas, y el diseño aprobado
-    // (`DOCS/design/entradas/revision-puesto-tactil.html` §2) pide **un botón con etiqueta**.
+    // (`DOCS/design/entradas/02-revision/revision-puesto-tactil.html` §2) pide **un botón con etiqueta**.
     //
     // ⚠️ 25 Sep 2026 (usuario) — AQUÍ vivió «Liberar n» y **se retira**, por dos razones medidas:
     //  (1) **No es el paso siguiente.** La decisión **22.a** del mapa pone la entrega en el WIZARD

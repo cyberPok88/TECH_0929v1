@@ -21,8 +21,8 @@ const VALOR_OTRA = '__otra__'
 
 interface AtributosDinamicosProps {
     esquema: AtributoEsquema[]
-    valores: Record<string, string>
-    onChange: (clave: string, valor: string) => void
+    valores: Record<string, string | string[]>
+    onChange: (clave: string, valor: string | string[]) => void
     /** Quien puede editar el hub (Administrador) ve «otra…» y agrega la opción. */
     puedeOtra: boolean
     onAgregarOpcion?: (def: AtributoEsquema, opcion: string) => Promise<string | null>
@@ -66,7 +66,10 @@ export function AtributosDinamicos({
     return (
         <div className="grid gap-3 sm:grid-cols-2">
             {esquema.map((def) => {
-                const actual = valorActual(def.clave)
+                // ⭐ 06 Oct 2026 — un `multi` devuelve un ARRAY. La lógica de `select`/«otra…»
+                // trabaja con la parte de TEXTO; el conjunto se lee aparte en su rama.
+                const crudo = valorActual(def.clave)
+                const actual = typeof crudo === 'string' ? crudo : ''
                 const customFueraDeLista =
                     def.tipo === 'select' &&
                     actual !== '' &&
@@ -82,7 +85,34 @@ export function AtributosDinamicos({
                             {def.requerido && <span className="text-destructive"> *</span>}
                         </Label>
 
-                        {def.tipo === 'select' ? (
+                        {def.tipo === 'multi' ? (
+                            /* ⭐ 06 Oct 2026 — el CONJUNTO. El array se manda tal como quedó: la BD
+                               lo normaliza, deduplica y ORDENA (`fn_valor_canonico`). */
+                            <div className="flex flex-wrap gap-1.5">
+                                {(def.opciones ?? []).map((opcion) => {
+                                    const lista = Array.isArray(crudo) ? crudo : []
+                                    const sel = lista.includes(opcion)
+                                    return (
+                                        <Button
+                                            key={opcion}
+                                            type="button"
+                                            size="sm"
+                                            variant={sel ? 'default' : 'outline'}
+                                            disabled={disabled}
+                                            aria-pressed={sel}
+                                            onClick={() =>
+                                                onChange(
+                                                    def.clave,
+                                                    sel ? lista.filter((x) => x !== opcion) : [...lista, opcion]
+                                                )
+                                            }
+                                        >
+                                            {opcion}
+                                        </Button>
+                                    )
+                                })}
+                            </div>
+                        ) : def.tipo === 'select' ? (
                             <div className="space-y-1.5">
                                 <select
                                     value={esOtraActiva(def.clave) ? VALOR_OTRA : actual || ''}

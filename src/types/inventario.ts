@@ -89,8 +89,8 @@ export interface ExistenciaProducto {
     id_ubicacion_default: string | null
     ubicacion_nombre: string | null
     maneja_numero_serie: boolean
-    /** Comparación contra stock_minimo — la calcula la SA (ok | bajo_minimo | sin_stock). */
-    estado_existencia: 'ok' | 'bajo_minimo' | 'sin_stock'
+    /** Comparación contra stock_minimo — la calcula la SA (ok | bajo_minimo | sin_stock | negativo). */
+    estado_existencia: 'ok' | 'bajo_minimo' | 'sin_stock' | 'negativo'
     total_lotes: number
 }
 
@@ -163,8 +163,8 @@ export interface FiltrosExistencias {
     busqueda: string
     id_categoria: string
     id_marca: string
-    /** '' = todos · 'ok'/'bajo_minimo'/'sin_stock' según estado derivado. */
-    estado: '' | 'ok' | 'bajo_minimo' | 'sin_stock'
+    /** '' = todos · 'ok'/'bajo_minimo'/'sin_stock'/'negativo' según estado derivado. */
+    estado: '' | 'ok' | 'bajo_minimo' | 'sin_stock' | 'negativo'
 }
 
 export interface FiltrosConteos {
@@ -213,16 +213,21 @@ export const OPCIONES_MOTIVO_SALIDA: MotivoSalidaManual[] = [
     'otro',
 ]
 
-export const TEXTO_ESTADO_CONSUMO: Record<'ok' | 'bajo_minimo' | 'sin_stock', string> = {
+export const TEXTO_ESTADO_CONSUMO: Record<'ok' | 'bajo_minimo' | 'sin_stock' | 'negativo', string> = {
     ok: 'Ok',
     bajo_minimo: 'Bajo mínimo',
     sin_stock: 'Sin stock',
+    negativo: 'Stock negativo',
 }
 
-export const TONO_ESTADO_CONSUMO: Record<'ok' | 'bajo_minimo' | 'sin_stock', TonoPildora> = {
+export const TONO_ESTADO_CONSUMO: Record<
+    'ok' | 'bajo_minimo' | 'sin_stock' | 'negativo',
+    TonoPildora
+> = {
     ok: 'exito',
     bajo_minimo: 'advertencia',
     sin_stock: 'peligro',
+    negativo: 'peligro',
 }
 
 export const TEXTO_ESTADO_CONTEO: Record<EstadoConteo, string> = {

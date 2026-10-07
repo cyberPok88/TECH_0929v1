@@ -16,6 +16,8 @@ import {
 import type { AtributoEsquema } from '@/types/catalogos'
 import type {
     ClaveSAT,
+    FiltrosProductosActivos,
+    OpcionCategoriaSelector,
     Producto,
     ProductoFiltros,
     ProductoOpcion,
@@ -31,6 +33,7 @@ interface FilaProductoCruda {
     sku: string
     codigo_barras: string | null
     nombre: string
+    modelo: string | null
     descripcion: string | null
     marca_fabricante: string | null
     id_marca: string | null
@@ -67,7 +70,7 @@ interface FilaProductoCruda {
 }
 
 const COLUMNAS = [
-    'id', 'sku', 'codigo_barras', 'nombre', 'descripcion', 'marca_fabricante',
+    'id', 'sku', 'codigo_barras', 'nombre', 'modelo', 'descripcion', 'marca_fabricante',
     'id_marca', 'id_categoria', 'id_unidad_medida', 'id_impuesto', 'atributos',
     'precio_base', 'precio_minimo', 'costo_promedio', 'stock_actual', 'stock_minimo',
     'id_ubicacion_default', 'maneja_numero_serie', 'requiere_revision',
@@ -86,6 +89,7 @@ function aFila(p: FilaProductoCruda): Producto {
         sku: p.sku,
         codigo_barras: p.codigo_barras,
         nombre: p.nombre,
+        modelo: p.modelo,
         descripcion: p.descripcion,
         marca_fabricante: p.marca_fabricante,
         id_marca: p.id_marca,
@@ -221,7 +225,7 @@ export async function listarProductos(
     const busqueda = filtros.busqueda.trim().replace(/[%_]/g, '')
     if (busqueda) {
         query = query.or(
-            `nombre.ilike.%${busqueda}%,sku.ilike.%${busqueda}%,codigo_barras.ilike.%${busqueda}%`
+            `nombre.ilike.%${busqueda}%,modelo.ilike.%${busqueda}%,sku.ilike.%${busqueda}%,codigo_barras.ilike.%${busqueda}%`
         )
     }
 
@@ -293,6 +297,7 @@ export async function crearProducto(
             sku,
             codigo_barras: aNull(d.codigo_barras),
             nombre: d.nombre,
+            modelo: aNull(d.modelo),
             descripcion: aNull(d.descripcion),
             id_marca: d.id_marca,
             id_categoria: d.id_categoria,
@@ -444,6 +449,7 @@ export async function editarProducto(
         .update({
             codigo_barras: aNull(d.codigo_barras),
             nombre: d.nombre,
+            modelo: aNull(d.modelo),
             descripcion: aNull(d.descripcion),
             id_marca: d.id_marca,
             id_categoria: d.id_categoria,
@@ -519,7 +525,7 @@ export async function listarSustitutos(idProducto: string): Promise<RespuestaLis
     if (ids.length === 0) return { success: true, data: [] }
     const { data: productos, error: err2 } = await supabase
         .from('productos')
-        .select('id, sku, nombre')
+        .select('id, sku, nombre, id_categoria, atributos')
         .in('id', ids)
         .order('nombre', { ascending: true })
     if (err2) return { success: false, error: err2.message }
@@ -571,7 +577,7 @@ export async function quitarSustituto(
 export interface CriteriosBusquedaAtributos {
     id_categoria?: string
     id_marca?: string
-    atributos?: Record<string, string>   // clave → valor (solo los en_huella capturados)
+    atributos?: Record<string, string | string[]>   // clave → valor (solo los en_huella capturados; `multi` ⇒ string[])
 }
 
 export async function buscarProductosPorAtributos(
@@ -581,7 +587,7 @@ export async function buscarProductosPorAtributos(
 
     let query = supabase
         .from('productos')
-        .select('id, sku, nombre')
+        .select('id, sku, nombre, id_categoria, atributos')
         .eq('es_archivado', false)
         .eq('es_activo', true)
 
@@ -679,7 +685,7 @@ export async function importarProductosCSV(
     const indice = (nombre: string) => encabezados.indexOf(nombre)
 
     const BASE = [
-        'nombre', 'categoria', 'marca', 'unidad', 'impuesto', 'precio_base',
+        'nombre', 'modelo', 'categoria', 'marca', 'unidad', 'impuesto', 'precio_base',
         'precio_minimo', 'stock_minimo', 'codigo_barras', 'requiere_revision',
         'maneja_numero_serie', 'descripcion', 'notas',
     ]
@@ -792,6 +798,19 @@ export async function importarProductosCSV(
                 }
                 continue
             }
+            // ⭐ 06 Oct 2026 — un `multi` entra por CSV con sus miembros unidos por `+`
+            // (el MISMO separador de la huella). Se valida cada miembro contra la lista,
+            // igual que un `select`.
+            if (def.tipo === 'multi') {
+                const miembros = valor.split('+').map((s) => s.trim()).filter(Boolean)
+                const fuera = def.opciones ? miembros.filter((m) => !(def.opciones ?? []).includes(m)) : []
+                if (fuera.length) {
+                    errores.push({ fila: numeroFila, error: `"${columna}" = "${fuera.join(', ')}" no está en la lista de la categoría (agrégala en Catálogos).` })
+                    continue
+                }
+                if (miembros.length) atributos[columna] = miembros
+                continue
+            }
             if (def.tipo === 'select' && def.opciones && !def.opciones.includes(valor)) {
                 errores.push({ fila: numeroFila, error: `"${columna}" = "${valor}" no está en la lista de la categoría (agrégala en Catálogos).` })
                 continue
@@ -815,6 +834,7 @@ export async function importarProductosCSV(
         const payload = {
             codigo_barras: codigoBarras || null,
             nombre,
+            modelo: leer('modelo') || null,
             descripcion: leer('descripcion') || null,
             id_marca: idMarca ?? null,
             id_categoria: filaCategoria.id,
@@ -888,21 +908,106 @@ export async function listarClavesSAT(
 // Contrato del SelectorProducto (kit 0.8 · PROMOCIÓN 17 Sep). Espejo de
 // listarProveedoresActivos (1.1). Antes la 1.4 tenía su copia en compras
 // (listarProductosParaPartida) — el kit no depende del dominio compras.
-export async function listarProductosActivos(busqueda = ''): Promise<RespuestaLista<ProductoOpcion>> {
+//
+// ⭐ 06 Oct 2026 (CASCADA del selector) — la firma pasa de `(busqueda = '')` a filtros:
+// Familia → Tipo → atributos `en_huella`. Cada cambio = 1 llamada; el buscador de texto
+// NO viaja (el selector sigue filtrando en cliente sobre las 50 que devuelve esta SA).
+export async function listarProductosActivos(
+    filtros: FiltrosProductosActivos = {}
+): Promise<RespuestaLista<ProductoOpcion>> {
     const supabase = await createClient()
 
     let query = supabase
         .from('productos')
-        .select('id, sku, nombre')
+        .select('id, sku, nombre, id_categoria, atributos')
         .eq('es_archivado', false)
         .eq('es_activo', true)
 
-    const termino = busqueda.trim().replace(/[%_]/g, '')
+    const termino = (filtros.busqueda ?? '').trim().replace(/[%_]/g, '')
     if (termino) {
         query = query.or(`nombre.ilike.%${termino}%,sku.ilike.%${termino}%,codigo_barras.ilike.%${termino}%`)
+    }
+
+    // Familia → sus Tipos (patrón de buscarProductosPorAtributos). ⚠️ La Familia agrupa y
+    // NO recibe productos (R8): sin esta expansión, elegir SOLO Familia devolvería 0 filas
+    // aunque sus Tipos tengan productos. Un Tipo no tiene hijos ⇒ la expansión es inocua.
+    if (filtros.id_categoria) {
+        const { data: hijos } = await supabase
+            .from('categorias_producto')
+            .select('id')
+            .eq('id_categoria_padre', filtros.id_categoria)
+        const ids = [filtros.id_categoria, ...(hijos ?? []).map((h) => h.id)]
+        query = query.in('id_categoria', ids)
+    }
+
+    // Atributos `en_huella` del Tipo. El ESQUEMA decide el operador: un `select` es una
+    // lista CERRADA ⇒ igualdad exacta (con `ilike`, «ATX» traería también «Micro-ATX» —
+    // medido en el esquema real); el resto (`text` sin opciones) filtra por CONTENIDO con
+    // `ilike` sobre `atributos->>clave` (decisión del dueño). Claves fuera del esquema se
+    // ignoran: el contrato es «solo claves del esquema».
+    const seleccionados = Object.entries(filtros.atributos ?? {}).filter(([, valor]) => valor !== '')
+    if (seleccionados.length > 0 && filtros.id_categoria) {
+        const { esquema } = await esquemaDeCategoria(supabase, filtros.id_categoria)
+        for (const [clave, bruto] of seleccionados) {
+            const definicion = esquema.find((a) => a.clave === clave)
+            if (!definicion) continue
+            // ⭐ 06 Oct 2026 — un criterio `multi` llega como ARRAY. La búsqueda por MIEMBRO de
+            // un conjunto es la mejora diferida (D2 · índices por atributo): hoy se OMITE, en vez
+            // de duplicar el normalizador en TS — la canonicalización vive en la BD y en un solo
+            // lugar (`fn_valor_canonico`). La cascada del selector hoy no ofrece `multi`, así que
+            // esta rama no se alcanza.
+            if (Array.isArray(bruto)) continue
+            const valor = bruto
+            query =
+                definicion.tipo === 'select' && (definicion.opciones ?? []).length > 0
+                    ? query.eq(`atributos->>${clave}`, valor)
+                    : query.ilike(`atributos->>${clave}`, `%${valor.replace(/[%_]/g, '')}%`)
+        }
     }
 
     const { data, error } = await query.order('nombre', { ascending: true }).limit(50)
     if (error) return { success: false, error: error.message }
     return { success: true, data: (data ?? []) as unknown as ProductoOpcion[] }
+}
+
+// ── Categorías de la CASCADA del selector (⭐ 06 Oct 2026) ─────────────────────
+// SA PROPIA de la 1.2 (decisión del dueño): NO reusa `listarCategorias()` de la 1.0, que
+// trae la fila entera del hub (`select '*'`, orden `orden`) — acá viaja lo mínimo para
+// pintar la cascada: id · nombre · padre + los atributos `en_huella` del Tipo.
+// La Familia no tiene esquema (R8: forzado a `[]`) ⇒ `atributos_huella` sale vacío sin
+// forzarlo en código: una raíz SIN hijos sí puede ser categoría final (`ProductoModal`
+// · `esquemaEfectivo`) y entonces su huella debe poder filtrarse.
+export async function listarCategoriasSelector(): Promise<RespuestaLista<OpcionCategoriaSelector>> {
+    const supabase = await createClient()
+    const { data, error } = await supabase
+        .from('categorias_producto')
+        .select('id, nombre, id_categoria_padre, esquema_atributos')
+        .eq('es_activo', true)
+        .order('nombre', { ascending: true })
+    if (error) return { success: false, error: error.message }
+
+    const filas = (data ?? []) as unknown as {
+        id: string
+        nombre: string
+        id_categoria_padre: string | null
+        esquema_atributos: AtributoEsquema[] | null
+    }[]
+
+    return {
+        success: true,
+        data: filas.map((f) => ({
+            id: f.id,
+            nombre: f.nombre,
+            id_categoria_padre: f.id_categoria_padre,
+            // Un Tipo sin `en_huella` es válido: su fila de atributos no se renderiza.
+            atributos_huella: (f.esquema_atributos ?? [])
+                .filter((a) => a.en_huella)
+                .map((a) => ({
+                    clave: a.clave,
+                    etiqueta: a.etiqueta,
+                    tipo: a.tipo,
+                    opciones: a.opciones,
+                })),
+        })),
+    }
 }

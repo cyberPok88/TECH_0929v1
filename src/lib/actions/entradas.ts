@@ -39,6 +39,7 @@ import type {
     TandaGrupo,
     TandaLiberada,
     CategoriaCapturable,
+    CategoriaEntrada,
     HuellaDevuelta,
     EtapasDeIngreso,
     LiberacionDeIngreso,
@@ -49,6 +50,9 @@ import { puedeLiberar, puedeAjustarNota } from '@/types/entradas'
 // emparejamiento (la usan el guardado, la lectura y el desglose). Antes vivía privada aquí.
 import { huellaCanonica, claveLinea } from '@/types/entradas'
 import type { AtributoEsquema } from '@/types/catalogos'
+// ⭐ FIX 05 Oct 2026 — el alta rápida BUSCA por huella antes de crear (una sola definición del
+// contrato de huella: la de 1.2, no una copia local).
+import { buscarProductosPorAtributos } from '@/lib/actions/productos'
 
 // ⭐ MEJORA 26 (24 Sep 2026) — una escritura denegada por RLS **no siempre duele**: PostgREST
 // devuelve `success` cuando el `USING` de la política filtra la fila (el UPDATE afecta 0 filas) y
@@ -830,12 +834,14 @@ export async function consultarNumeroSerie(nsCrudo: string): Promise<RespuestaDa
 
 /** Categorías capturables (esquema no vacío — HDD/M.2/SSD/RAM): el select de recepción
  *  y el esquema que revisión renderiza para resolver el SKU por huella. Regla D16
- *  (MODELO_DATOS §7.3.2): esquema propio, o el de la raíz si la sub no define uno. */
+ *  (MODELO_DATOS §7.3.2): esquema propio, o el de la raíz si la sub no define uno.
+ *  ⭐ MEJORA 44 — trae `requiere_lector`: si la revisión de esa categoría se hace con el
+ *  LECTOR DE DISCOS (SMART/salud). Reemplaza la detección por NOMBRE, que era frágil. */
 export async function listarCategoriasCapturables(): Promise<RespuestaLista<CategoriaCapturable>> {
     const supabase = await createClient()
     const { data, error } = await supabase
         .from('categorias_producto')
-        .select('id, nombre, id_categoria_padre, esquema_atributos')
+        .select('id, nombre, id_categoria_padre, esquema_atributos, requiere_lector')
         .eq('es_activo', true)
         .order('nombre', { ascending: true })
     if (error) return { success: false, error: error.message }
@@ -845,6 +851,7 @@ export async function listarCategoriasCapturables(): Promise<RespuestaLista<Cate
         nombre: string
         id_categoria_padre: string | null
         esquema_atributos: AtributoEsquema[] | null
+        requiere_lector: boolean | null
     }[]
 
     const esquemaDe = (f: (typeof filas)[number]): AtributoEsquema[] => {
@@ -858,20 +865,127 @@ export async function listarCategoriasCapturables(): Promise<RespuestaLista<Cate
 
     const capturables = filas
         .filter((f) => esquemaDe(f).length > 0)
-        .map((f) => ({ id: f.id, nombre: f.nombre, esquema: esquemaDe(f) }))
+        .map((f) => ({
+            id: f.id,
+            nombre: f.nombre,
+            esquema: esquemaDe(f),
+            // `?? false` es el respaldo del contrato: la columna es NOT NULL, pero un
+            // select que la omita NO debe encender el lector por accidente.
+            requiere_lector: f.requiere_lector ?? false,
+        }))
     return { success: true, data: capturables }
 }
 
-/** Alta rápida de producto (marcado pendiente_enriquecimiento). Usa catálogos default. */
+/**
+ * ⭐ 05 Oct 2026 (ANEXIÓN-BD `g12_a3_b1`) — **LAS 18 categorías del modal de Recepción**, con lo que
+ * cada flujo necesita para filtrarlas:
+ *   · el flujo de **mercancía NO nueva** ofrece las que tienen `requiere_revision_pieza` (hoy **4**:
+ *     HDD · RAM · SSD · M.2) — y por eso el control de categoría **vuelve a ser chips** (de **36px**: densidad de escritorio, FIX 2 del mismo día);
+ *   · el de **mercancía nueva**, **las 18 activas** (Familias + Tipos), **agrupadas por Familia**.
+ *
+ * Devuelve el **esquema efectivo** (propio, o el de la Familia si el Tipo no define uno — regla D16),
+ * `requiere_lector` (MEJORA 44) y `tiene_hijas` (para rotular «sin detallar» las Familias que también
+ * son opción).
+ *
+ * ⚠️ El filtro por flujo se hace **en la UI**: es un catálogo **cerrado de 18 filas** ⇒ **una sola
+ * lectura** y conmutar el flujo **no cuesta un viaje** (SPEC §10 Gate 2). La regla «el servidor manda»
+ * es para listados paginados, no para un catálogo cerrado.
+ * ⚠️ `listarCategoriasCapturables()` (arriba) **NO se toca**: la Revisión la sigue consumiendo igual.
+ * ⚠️ El flag se lee **de la columna**: prohibido comparar el NOMBRE (el proyecto ya pagó ese defecto
+ * con la detección del lector).
+ */
+export async function listarCategoriasParaEntrada(): Promise<RespuestaLista<CategoriaEntrada>> {
+    const supabase = await createClient()
+    const { data, error } = await supabase
+        .from('categorias_producto')
+        .select('id, nombre, id_categoria_padre, esquema_atributos, requiere_lector, requiere_revision_pieza')
+        .eq('es_activo', true)
+        .order('nombre', { ascending: true })
+    if (error) return { success: false, error: error.message }
+
+    const filas = (data ?? []) as unknown as {
+        id: string
+        nombre: string
+        id_categoria_padre: string | null
+        esquema_atributos: AtributoEsquema[] | null
+        requiere_lector: boolean | null
+        requiere_revision_pieza: boolean | null
+    }[]
+
+    /** Esquema EFECTIVO: el propio, o el de la Familia (D16). */
+    const esquemaDe = (f: (typeof filas)[number]): AtributoEsquema[] => {
+        if (f.esquema_atributos && f.esquema_atributos.length > 0) return f.esquema_atributos
+        if (f.id_categoria_padre) {
+            const padre = filas.find((x) => x.id === f.id_categoria_padre)
+            return (padre?.esquema_atributos ?? []) as AtributoEsquema[]
+        }
+        return []
+    }
+
+    const categorias: CategoriaEntrada[] = filas
+        .map((f) => ({
+            id: f.id,
+            nombre: f.nombre,
+            id_categoria_padre: f.id_categoria_padre,
+            esquema: esquemaDe(f),
+            requiere_lector: f.requiere_lector ?? false,
+            // `?? false` es el respaldo del contrato: la columna es NOT NULL, pero un select que la
+            // omita NO debe meter una categoría en el flujo NO nueva por accidente.
+            requiere_revision_pieza: f.requiere_revision_pieza ?? false,
+            tiene_hijas: filas.some((h) => h.id_categoria_padre === f.id),
+        }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+
+    return { success: true, data: categorias, total: categorias.length }
+}
+
+/** Alta rápida de producto (marcado pendiente_enriquecimiento). Usa catálogos default.
+ *
+ *  ⭐ FIX 05 Oct 2026 — **BUSCA ANTES DE CREAR: la huella es identidad, no una sugerencia.**
+ *  Antes, pulsar «Crear producto» N veces creaba N productos: **nada miraba si ya existía uno con
+ *  las mismas etiquetas** (así nacieron los duplicados `P-000001`/`P-000003`, dos SKU con la misma
+ *  huella). La huella son **los atributos `en_huella` del esquema de la categoría**, que es el mismo
+ *  contrato que consume `buscarProductosPorAtributos`.
+ *  ⚠️ La búsqueda exige **marca**: marca + categoría son parte de la huella, y sin marca el match
+ *  traería el producto de otro fabricante con los mismos atributos.
+ *  Devuelve `existente: true` cuando reutilizó uno — la UI lo dice en vez de mentir con «creado».
+ */
 export async function crearProductoRapido(input: {
     id_categoria: string
     id_marca: string | null
     nombre: string
     atributos: Record<string, unknown>
-}): Promise<RespuestaDato<{ id: string; sku: string }>> {
+}): Promise<RespuestaDato<{ id: string; sku: string; existente: boolean }>> {
     const supabase = await createClient()
     const sesion = await sesionActiva(supabase)
     if ('error' in sesion) return { success: false, error: sesion.error }
+
+    // ── Find: ¿ya hay un producto con ESTA huella? ─────────────────────────────────
+    if (input.id_marca) {
+        const { data: cat } = await supabase
+            .from('categorias_producto')
+            .select('esquema_atributos')
+            .eq('id', input.id_categoria)
+            .maybeSingle()
+        const esquema = ((cat?.esquema_atributos ?? []) as AtributoEsquema[])
+        const huella: Record<string, string> = {}
+        for (const a of esquema) {
+            if (!a.en_huella) continue
+            const v = input.atributos[a.clave]
+            if (v !== undefined && v !== null && String(v) !== '') huella[a.clave] = String(v)
+        }
+        if (Object.keys(huella).length > 0) {
+            const ya = await buscarProductosPorAtributos({
+                id_categoria: input.id_categoria,
+                id_marca: input.id_marca,
+                atributos: huella,
+            })
+            const candidatos = ya.success ? (ya.data ?? []) : []
+            if (candidatos.length > 0) {
+                return { success: true, data: { id: candidatos[0].id, sku: candidatos[0].sku, existente: true } }
+            }
+        }
+    }
 
     const [{ data: unidad }, { data: impuesto }, { data: folio, error: errFolio }] = await Promise.all([
         supabase.from('unidades_medida').select('id').eq('es_activo', true).limit(1).maybeSingle(),
@@ -902,8 +1016,29 @@ export async function crearProductoRapido(input: {
         })
         .select('id, sku')
         .single()
-    if (error) return { success: false, error: error.message }
-    return { success: true, data: { id: data.id, sku: data.sku } }
+    if (error) {
+        // ⭐ 05 Oct 2026 — **la BD es la autoridad.** Si el índice único `uq_productos_clave_huella`
+        // rebotó el INSERT es porque YA existe un producto con la misma huella **normalizada** que
+        // el match crudo no vio («480gb» vs «480GB», «i5-12400» vs «i5 12400»). En vez de mostrar el
+        // error crudo, se resuelve por la CLAVE —la misma regla de la BD— y se reutiliza.
+        // (El 23505 también lo levantan `sku` y `codigo_barras`: por eso se confirma con la búsqueda
+        //  por clave antes de decidir; si no aparece, el error se propaga tal cual.)
+        if (error.code === '23505') {
+            const { data: existente } = await supabase.rpc('producto_por_clave_huella', {
+                p_id_categoria: input.id_categoria,
+                p_id_marca: input.id_marca,
+                p_atributos: input.atributos,
+            })
+            const fila = (Array.isArray(existente) ? existente[0] : null) as
+                | { id: string; sku: string }
+                | null
+            if (fila) {
+                return { success: true, data: { id: fila.id, sku: fila.sku, existente: true } }
+            }
+        }
+        return { success: false, error: error.message }
+    }
+    return { success: true, data: { id: data.id, sku: data.sku, existente: false } }
 }
 
 /** Resultado de la revisión (aprobadas por SKU + devoluciones por motivo). */
@@ -1022,6 +1157,68 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
     }
     if (input.piezas.length === 0) return { success: false, error: 'El lote está vacío.' }
 
+    /**
+     * ⭐ MEJORA 44 (30 Sep 2026) — **LA SALUD SIN AVAL NO MANDA UNA DEVOLUCIÓN.**
+     *
+     * El número de salud sale de TRES fuentes y no son equivalentes: `hdsentinel` (el taller) y
+     * `nvme` (el propio disco) deciden; `formula` —el respaldo de la casa, que **ARRANCA EN 100** y
+     * resta puntos por daño— NO. Si HDSentinel no tiene el disco en su reporte, la fórmula dice
+     * «100 %, pasa» por defecto, y al revés: un disco con daño real puntuado por la fórmula mandaba
+     * una devolución con un número que el taller nunca avaló.
+     *
+     * La regla vive acá y no solo en la UI por la misma razón que el tope de la MEJORA 25: **la UI
+     * protege al técnico de sí mismo, el servidor protege el dato.** Un `SALUD_BAJA` sobre un disco
+     * sin aval es una devolución inventada; si el técnico quiere devolverlo igual, tiene los tres
+     * motivos A MANO (`DANO_FISICO` · `NO_FUNCIONA` · `EMPAQUE_DANADO`), que sí son su palabra y no
+     * la de una fórmula.
+     */
+    const MOTIVOS_CON_SALUD = new Set(['SALUD_BAJA'])
+    if (input.lecturas?.length) {
+        /**
+         * ⚠️ SE AGRUPA POR PARTIDA, NO POR NS. La pieza ya no lleva `ns` (MEJORA 35: el NS vive en el
+         * concentrado de la tanda, no en la pieza), así que emparejar pieza↔lectura por NS sería un
+         * guard que **nunca se dispara**. Lo que sí se puede afirmar: si en esta tanda se devuelve por
+         * salud y **EN ESA PARTIDA** ninguna lectura tiene aval, ese `SALUD_BAJA` salió de la fórmula.
+         */
+        const idsMotivo = [...new Set(input.piezas.map((p) => p.id_motivo).filter((x): x is string => !!x))]
+        const { data: filasMotivo } = idsMotivo.length
+            ? await supabase.from('motivos_rechazo').select('id, clave').in('id', idsMotivo)
+            : { data: [] as { id: string; clave: string | null }[] }
+        const claveDeMotivo = new Map<string, string>(
+            ((filasMotivo ?? []) as { id: string; clave: string | null }[]).map((m) => [m.id, m.clave ?? ''])
+        )
+
+        // Partidas de esta tanda donde NINGUNA lectura pudo decidir.
+        const partidasSinAval = new Set<string>()
+        for (const idPartida of new Set(input.piezas.map((p) => p.id_partida_entrada))) {
+            const delGrupo = input.lecturas.filter((l) => l.id_partida_entrada === idPartida)
+            if (delGrupo.length > 0 && delGrupo.every((l) => l.apto_para_decidir !== true)) {
+                partidasSinAval.add(idPartida)
+            }
+        }
+
+        const culpable = input.piezas.find(
+            (p) =>
+                p.resultado === 'NO_PASA' &&
+                !!p.id_motivo &&
+                MOTIVOS_CON_SALUD.has(claveDeMotivo.get(p.id_motivo) ?? '') &&
+                partidasSinAval.has(p.id_partida_entrada)
+        )
+        if (culpable) {
+            const l = input.lecturas.find((x) => x.id_partida_entrada === culpable.id_partida_entrada)
+            return {
+                success: false,
+                error:
+                    'La salud de ese disco NO está avalada por HDSentinel' +
+                    `${l?.salud_puntaje != null ? ` (${l.salud_puntaje} %` : ' ('}` +
+                    `${l?.salud_veredicto ? `, fuente: ${l.salud_veredicto}` : ', fuente: la fórmula propia del agente'}` +
+                    '). El agente la calculó con su fórmula, que arranca en 100: esa devolución no se puede ' +
+                    'registrar así. Si el disco está dañado, rechazalo a mano (Daño físico / No funciona / ' +
+                    'Empaque dañado) y queda tu palabra en vez de un número sin aval.',
+            }
+        }
+    }
+
     // Transición a en_revision (primera toma).
     if (entrada.estado !== 'en_revision') {
         await supabase.from('transiciones_etapa').insert({
@@ -1094,7 +1291,7 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
     // (`id_producto`) queda NULL y lo asigna ALMACÉN al cotejar.
     const gruposPasa = new Map<
         string,
-        { idPartida: string; idMarca: string; atributos: Record<string, string>; count: number }
+        { idPartida: string; idMarca: string; atributos: Record<string, string | string[]>; count: number }
     >()
     for (const p of pasa) {
         const k = `${p.id_partida_entrada}|${p.id_marca}|${huellaCanonica(p.atributos)}`
@@ -1103,7 +1300,7 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
             ({ idPartida: p.id_partida_entrada, idMarca: p.id_marca, atributos: p.atributos ?? {}, count: 0 } as const as {
                 idPartida: string
                 idMarca: string
-                atributos: Record<string, string>
+                atributos: Record<string, string | string[]>
                 count: number
             })
         g.count += 1
@@ -1147,6 +1344,12 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
      * vuelva a entrar. Se escribe en UNA inserción con la tanda (D2: sin NS no hay guardado).
      * La marca y el motivo NO se guardan aquí: el NS no los conoce (corrección del usuario, 27 Sep).
      */
+    /**
+     * ⭐ MEJORA 44 — `ns` → `id` de `numeros_serie`: lo que permite ligar cada LECTURA con su PIEZA
+     * (se llena con el insert de arriba y se usa abajo, en el mismo acto de guardado).
+     */
+    const idsNs = new Map<string, string>()
+
     if (input.ns) {
         /**
          * ⭐ MEJORA 28 Sep 2026 — **D2, aplicada en el SERVIDOR.** El concentrado no es un adorno de la
@@ -1184,8 +1387,66 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
             creado_por: sesion.userId,
         }))
         if (filasNs.length) {
-            const { error: errNs } = await supabase.from('numeros_serie').insert(filasNs)
+            // ⭐ MEJORA 44 — se piden los ids de vuelta para poder LIGAR cada lectura con su pieza.
+            const { data: nsCreados, error: errNs } = await supabase
+                .from('numeros_serie')
+                .insert(filasNs)
+                .select('id, ns')
             if (errNs) return { success: false, error: errNs.message }
+            for (const r of nsCreados ?? []) idsNs.set(r.ns, r.id)
+        }
+
+        /**
+         * ⭐ MEJORA 44 (30 Sep 2026) — **la LECTURA del disco** entra como EVIDENCIA en el mismo acto
+         * que la tanda y el concentrado. `lecturas_disco` es append-only: no se actualiza ni se borra.
+         * ⚠ `id_partida_resuelta` queda NULL en esta pasada (ligar cada lectura a su grupo de huella es
+         * un refinamiento pendiente); la lectura SÍ queda ligada a su entrada, partida, NS y marca.
+         * ⚠ Si el puesto no tiene agente, `input.lecturas` no viene y no pasa nada: nunca bloquea.
+         */
+        if (input.lecturas?.length) {
+            const filasLecturas = input.lecturas
+                .filter((l) => l.ns)
+                .map((l) => ({
+                    id_entrada: input.id_entrada,
+                    id_partida_entrada: l.id_partida_entrada,
+                    id_numero_serie: idsNs.get(l.ns) ?? null,
+                    id_marca: l.id_marca ?? null,
+                    ns: l.ns,
+                    ns_windows: l.ns_windows ?? null,
+                    lun: l.lun ?? null,
+                    disco_fisico: l.disco_fisico ?? null,
+                    bahia: l.bahia ?? null,
+                    modelo: l.modelo ?? null,
+                    firmware: l.firmware ?? null,
+                    capacidad_gb: l.capacidad_gb ?? null,
+                    rpm: l.rpm ?? null,
+                    interfaz: l.interfaz ?? null,
+                    es_nvme: l.es_nvme ?? false,
+                    horas_uso: l.horas_uso ?? null,
+                    encendidos: l.encendidos ?? null,
+                    temperatura_c: l.temperatura_c ?? null,
+                    salud_veredicto: l.salud_veredicto ?? null,
+                    salud_puntaje: l.salud_puntaje ?? null,
+                    salud_en_falla: l.salud_en_falla ?? false,
+                    salud_motivos: (l.salud_motivos ?? []) as never,
+                    apto: l.apto ?? null,
+                    // ⭐ MEJORA 44 — el AVAL de la salud (ver `g18_m44_aval_salud`).
+                    apto_para_decidir: l.apto_para_decidir ?? false,
+                    requiere_revision: l.requiere_revision ?? false,
+                    sectores_reasignados: l.sectores_reasignados ?? null,
+                    sectores_pendientes: l.sectores_pendientes ?? null,
+                    sectores_no_corregibles: l.sectores_no_corregibles ?? null,
+                    errores_crc: l.errores_crc ?? null,
+                    motor: l.motor ?? 'desconocido',
+                    smart_raw: (l.smart_raw ?? null) as never,
+                    origen: 'revision',
+                    leido_por: sesion.userId,
+                    creado_por: sesion.userId,
+                }))
+            if (filasLecturas.length) {
+                const { error: errLecturas } = await supabase.from('lecturas_disco').insert(filasLecturas)
+                if (errLecturas) return { success: false, error: errLecturas.message }
+            }
         }
     } else {
         /**
@@ -1223,7 +1484,7 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
             idPartida: string
             idMotivo: string
             idMarca: string
-            atributos: Record<string, string>
+            atributos: Record<string, string | string[]>
             count: number
             salud: number | null
         }
@@ -1777,7 +2038,17 @@ export async function confirmarAltaBandeja(input: {
         .order('tanda', { ascending: true })
     if (!filas || filas.length === 0) return { success: false, error: 'Las tandas no existen.' }
     if (!filas.some((f) => f.estado === 'en_almacen')) {
-        return { success: false, error: 'La bandeja no está entregada al almacén.' }
+        // ⭐ FIX 05 Oct 2026 — el mensaje dice el ESTADO real. Antes decía sólo «no está entregada
+        // al almacén» y no había forma de saber qué pasaba: el caso vivo era una bandeja **ya
+        // confirmada** a la que la UI le seguía ofreciendo «Cotejar» (AltaCatalogo elegía la
+        // bandeja más antigua sin mirar su estado). Sólo se da de alta lo que está EN ALMACÉN.
+        const estados = [...new Set(filas.map((f) => String(f.estado)))].join(', ')
+        return {
+            success: false,
+            error:
+                `Esta bandeja no se puede dar de alta: su estado es «${estados}» y sólo se da de alta ` +
+                'lo que está en almacén (esperando cotejo). Si ya la confirmaste, aparece como «Ya en almacén».',
+        }
     }
     const idEntrada = filas[0].id_entrada as string
 

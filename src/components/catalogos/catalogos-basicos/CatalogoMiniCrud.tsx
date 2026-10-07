@@ -223,7 +223,7 @@ function CatalogoModal({ config, estado, onClose, onExito }: CatalogoModalProps)
   const inicial = useMemo<Record<string, unknown>>(() => {
     if (estado.modo === 'editar' && registro) return config.formDesdeRegistro(registro)
     const base: Record<string, unknown> = {}
-    for (const campo of config.campos) base[campo.name] = campo.tipo === 'switch' ? true : ''
+    for (const campo of config.campos) base[campo.name] = campo.tipo === 'switch' ? true : campo.tipo === 'segmentado' ? (campo.opciones?.[0]?.value ?? '') : ''
     return base
   }, [config, estado.modo, registro])
 
@@ -247,7 +247,7 @@ function CatalogoModal({ config, estado, onClose, onExito }: CatalogoModalProps)
     for (const campo of config.campos) {
       if (campo.soloCrear && estado.modo !== 'crear') continue
       const raw = valores[campo.name]
-      payload[campo.name] = campo.tipo === 'number' ? Number(raw) : campo.tipo === 'text' ? String(raw).trim() : raw
+      payload[campo.name] = campo.tipo === 'number' ? Number(raw) : campo.tipo === 'text' ? String(raw).trim() : campo.tipo === 'segmentado' ? String(raw) : raw
     }
     setOcupado(true)
     const res = estado.modo === 'crear'
@@ -317,6 +317,45 @@ function CampoControl({ campo, value, deshabilitado, onChange }: CampoControlPro
             {(campo.opciones ?? []).map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
           </SelectContent>
         </Select>
+      </div>
+    )
+  }
+  if (campo.tipo === 'segmentado') {
+    /**
+     * ⭐ TIPO NUEVO (05 Oct 2026 · `g12_a4_b1`): **2 botones excluyentes** — lo pidió el dueño para
+     * las listas de precios (*«y abajo 2 botones: descuento / incremento»*). No es un `<select>`
+     * a propósito: son **dos estados** y el elegido tiene que verse de un vistazo.
+     * ⚠️ Sin imports nuevos (`Button` no estaba en este archivo): botón nativo + las clases de la
+     *    casa. El estado activo usa los tokens `primary`, no un color a mano.
+     */
+    return (
+      <div className="grid gap-1.5">
+        <Label>{campo.label}</Label>
+        <div className="flex flex-wrap gap-2">
+          {(campo.opciones ?? []).map((op) => {
+            const activo = String(value ?? '') === op.value
+            return (
+              <button
+                key={op.value}
+                type="button"
+                disabled={deshabilitado}
+                aria-pressed={activo}
+                onClick={() => onChange(op.value)}
+                className={
+                  'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 ' +
+                  (activo
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-surface text-foreground hover:bg-muted')
+                }
+              >
+                {op.label}
+              </button>
+            )
+          })}
+        </div>
+        {campo.ayuda ? (
+          <p className="text-[11px] leading-snug text-muted-foreground">{campo.ayuda}</p>
+        ) : null}
       </div>
     )
   }

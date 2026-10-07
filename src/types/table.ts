@@ -279,6 +279,32 @@ export interface DataTableProps<TData = unknown> {
      *  permitiendo varias filas expandidas, que es el comportamiento de siempre. */
     unaFilaExpandida?: boolean
 
+    /** ⭐ PROMOCIÓN 05 Oct 2026 (Guía 1.6 → kit 0.8, `contrato agregado 05 Oct 2026`) — **EL CHEVRON
+     *  QUE ABRE UN MODAL EN VEZ DE DESPLEGAR LA FILA**.
+     *
+     *  El pedido del dueño (mismo día): *«el chevron no despliega… que lo muestre en un modal».*
+     *  Si esta prop viene, el chevron de la fila **llama a `onDesplegar(fila)` y NO alterna
+     *  `filasExpandidas`**: la fila no se mueve, no se tiñe y no aparece la fila de detalle.
+     *  ⚠️ Medido: el `<th>`/`<td>` «Detalles» se pintaban SOLO `if (renderFilaExpandida)` ⇒ sin
+     *  este opt-in, dejar de pasar `renderFilaExpandida` **hacía desaparecer la columna**. Por eso
+     *  las dos piezas se pintan con `renderFilaExpandida || onDesplegar`.
+     *
+     *  Es **aditivo y opt-in**: sin `onDesplegar` el comportamiento es EXACTAMENTE el de antes
+     *  (los CRUDs que despliegan la fila — Revisión · Acondicionamiento · Almacén · Notas de
+     *  remisión — no cambian una línea). Consumidor: Recepción (1.6 Fase 1). */
+    onDesplegar?: (fila: TData) => void
+
+    /** ⭐ PROMOCIÓN 05 Oct 2026 (Guía 1.6 → kit 0.8, `contrato agregado 05 Oct 2026`) — **EL NOMBRE
+     *  ACCESIBLE DEL CHEVRON**.
+     *
+     *  Sin esta prop el chevron se anuncia «Desplegar la fila {rowKey}» y, cuando el `rowKey` es un
+     *  UUID, eso es lo que oye un lector de pantalla: *«Desplegar la fila 94a2cbe9-d428-4fba-a57b-…»*
+     *  (defecto adyacente medido, 05 Oct 2026). El CRUD sabe cómo se llama su fila para un humano
+     *  —el folio— y es quien tiene que poder decirlo: acá solo se toma la etiqueta.
+     *
+     *  Default (sin la prop): `la fila ${rowKey}` — el texto de siempre. */
+    etiquetaFila?: (fila: TData) => string
+
     /** ⭐ MEJORA 20 Sep 2026 (usuario) — alineación por defecto de los DATOS de la tabla.
      *  Default `'centro'`: el usuario pidió centrar los datos en todas las tablas
      *  (sus encabezados ya salían centrados por el default del navegador y los datos

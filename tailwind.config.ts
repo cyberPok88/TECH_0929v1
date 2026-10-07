@@ -142,13 +142,38 @@ const config: Config = {
   				to: {
   					height: '0'
   				}
+  			},
+  			/*
+  			 * ⭐ MEJORA 46 (04 Oct 2026) — el TRABAJO se ve trabajando.
+  			 * Las 4 animaciones de arriba son de ENTRADA/SALIDA (aparece, se va). El formateo necesita
+  			 * lo contrario: una espera LARGA que diga «estoy trabajando» mientras el disco se borra.
+  			 * Medido: las formas del modal salian QUIETAS — la decision D1-A pedia «forma fija por
+  			 * fase + latido» y el latido no se habia implementado.
+  			 *
+  			 * ⚠️ `trazo` usa `var(--per)` (el PERIMETRO de cada figura, en px = unidades del viewBox),
+  			 *    que cada forma declara en su `style`: UN keyframe sirve para las 4 y el hueco del dash
+  			 *    recorre el contorno entero. El `stroke-dasharray` va como atributo del SVG.
+  			 * ⚠️ `spin` (default de Tailwind) y `pulse` se REUSAN para variar por fase —el cuadrado
+  			 *    gira lento y el rombo late— en vez de inventar dos keyframes mas.
+  			 */
+  			trazo: {
+  				'0%': { strokeDashoffset: '0' },
+  				'100%': { strokeDashoffset: 'calc(-1 * var(--per))' }
+  			},
+  			brillo: {
+  				'0%': { transform: 'translateX(-120%)' },
+  				'100%': { transform: 'translateX(320%)' }
   			}
   		},
   		animation: {
   			'fade-up': 'fade-up 0.3s ease-out',
   			'fade-in': 'fade-in 0.2s ease-out',
   			'accordion-down': 'accordion-down 0.2s ease-out',
-  			'accordion-up': 'accordion-up 0.2s ease-out'
+  			'accordion-up': 'accordion-up 0.2s ease-out',
+  			// La espera larga del formateo (MEJORA 46): el trazo recorre la figura, la figura se
+  			// balancea, y el segmento activo de la barra tiene un brillo que lo recorre de punta a punta.
+  			trazo: 'trazo 2.6s linear infinite',
+  			brillo: 'brillo 1.5s ease-in-out infinite'
   		}
   	}
   },

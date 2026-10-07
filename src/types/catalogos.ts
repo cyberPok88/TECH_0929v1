@@ -3,7 +3,7 @@
 
 export type ClaveTabCatalogo =
   | 'impuestos' | 'unidades_medida' | 'categorias' | 'canales_venta'
-  | 'marcas_comerciales' | 'tipos_cliente' | 'rutas_cobro'
+  | 'marcas_comerciales' | 'tipos_cliente'
   | 'listas_precios' | 'vendedores' | 'marcas_producto' | 'ubicaciones_almacen';
 
 // --- Respuesta uniforme (convención proyecto) ---
@@ -34,7 +34,11 @@ export interface CategoriaFila {
 }
 export interface AtributoEsquema {
   clave: string; etiqueta: string;
-  tipo: 'text' | 'number' | 'select'; requerido: boolean; opciones?: string[];
+  /** ⭐ 06 Oct 2026 — `multi`: vale un CONJUNTO (`string[]`). La CANONICALIZACIÓN
+   *  (normalizar · deduplicar · ordenar) la hace la BD en `fn_valor_canonico`, nunca el
+   *  cliente: si la hiciera cada escritor, dos escritores distintos darían DOS SKU del
+   *  mismo conjunto y el UNIQUE no lo detectaría. Ver `bd-productos.md §7.3`. */
+  tipo: 'text' | 'number' | 'select' | 'multi'; requerido: boolean; opciones?: string[];
   /** ⭐ Huella canónica (1.6): true = el atributo forma parte de la identidad del SKU. */
   en_huella?: boolean;
   /** ⭐ Evolución V5 (20 Sep 2026): true = se captura en RECEPCIÓN (soft). Si falta, en REVISIÓN. */
@@ -85,25 +89,22 @@ export interface TipoClienteFormData {
   descripcion?: string; orden: number; es_activo: boolean;
 }
 
-// --- Listas de precios (+ % + default) ---
+// --- Listas de precios (% de ajuste — DESCUENTO o INCREMENTO — + default) ---
+// ⚠️ La columna es `porcentaje_descuento` (NO `porcentaje_ajuste`, que es la de `tipos_cliente`).
+//    El nombre sobrevive porque el % SIEMPRE es positivo; **quién baja o sube lo dice `tipo_ajuste`**
+//    (⭐ `g12_a4_b1` · 05 Oct 2026).
 export interface ListaPrecioFila {
-  id: string; clave: string; nombre: string; porcentaje_ajuste: number;
+  id: string; clave: string; nombre: string; porcentaje_descuento: number;
+  /** ⭐ `descuento` → `base × (1 − %)` · `incremento` → `base × (1 + %)`. */
+  tipo_ajuste: string;
   es_lista_default: boolean; es_activo: boolean;
   created_at: string | null; updated_at: string | null;
 }
 export interface ListaPrecioFormData {
   clave: string; nombre: string; porcentaje_ajustePorciento: number;
+  /** ⭐ Los 2 botones del formulario: `descuento` | `incremento`. */
+  tipoAjuste: string;
   es_lista_default: boolean; es_activo: boolean;
-}
-
-// --- Rutas de cobro (+ cobrador) ---
-export interface RutaCobroFila {
-  id: string; clave: string; nombre: string; descripcion: string | null;
-  id_cobrador_asignado: string | null; es_activo: boolean;
-  created_at: string | null; updated_at: string | null;
-}
-export interface RutaCobroFormData {
-  clave: string; nombre: string; descripcion?: string; id_cobrador_asignado?: string | null; es_activo: boolean;
 }
 
 // --- Ubicaciones del almacén (cascada 4 niveles) ---

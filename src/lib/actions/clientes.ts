@@ -45,7 +45,6 @@ interface FilaClienteCruda {
     id_tipo_cliente: string
     id_lista_precio: string
     id_canal_venta: string | null
-    id_ruta_cobro: string | null
     id_vendedor_asignado: string | null
     tiene_credito: boolean
     limite_credito: number | null
@@ -70,7 +69,6 @@ interface FilaClienteCruda {
     tipos_cliente: { nombre: string } | null
     listas_precios: { nombre: string } | null
     canales_venta: { nombre: string } | null
-    rutas_cobro: { nombre: string } | null
     usuarios: { nombre_completo: string } | null
     sat_regimenes_fiscales: { descripcion: string } | null
 }
@@ -78,7 +76,7 @@ interface FilaClienteCruda {
 const COLUMNAS = [
     'id', 'codigo', 'nombre_comercial', 'razon_social', 'tipo_persona',
     'id_marca_comercial', 'id_tipo_cliente', 'id_lista_precio',
-    'id_canal_venta', 'id_ruta_cobro', 'id_vendedor_asignado',
+    'id_canal_venta', 'id_vendedor_asignado',
     'tiene_credito', 'limite_credito', 'dias_credito', 'saldo_inicial', 'saldo_actual',
     'rfc', 'id_regimen_fiscal', 'id_uso_cfdi',
     'notas', 'es_activo', 'es_archivado', 'es_suspendido',
@@ -88,7 +86,6 @@ const COLUMNAS = [
     'tipos_cliente(nombre)',
     'listas_precios(nombre)',
     'canales_venta(nombre)',
-    'rutas_cobro(nombre)',
     'usuarios!fk_clientes_vendedor(nombre_completo)',
     'sat_regimenes_fiscales(descripcion)',
 ].join(',')
@@ -108,8 +105,6 @@ function aFila(p: FilaClienteCruda): Cliente {
         lista_precio_nombre: p.listas_precios?.nombre ?? null,
         id_canal_venta: p.id_canal_venta,
         canal_venta_nombre: p.canales_venta?.nombre ?? null,
-        id_ruta_cobro: p.id_ruta_cobro,
-        ruta_cobro_nombre: p.rutas_cobro?.nombre ?? null,
         id_vendedor_asignado: p.id_vendedor_asignado,
         vendedor_nombre: p.usuarios?.nombre_completo ?? null,
         tiene_credito: p.tiene_credito,
@@ -209,7 +204,9 @@ export async function listarClientesActivos(): Promise<RespuestaLista<ClienteOpc
 
     const { data, error } = await supabase
         .from('clientes')
-        .select('id, codigo, nombre_comercial, rfc')
+        // ⭐ ANEXIÓN 05 Oct 2026: `dias_credito` viaja en la opción (lo pide la confirmación
+        //   de la nota de venta para mostrar el plazo sin una consulta extra).
+        .select('id, codigo, nombre_comercial, rfc, dias_credito')
         .eq('es_archivado', false)
         .eq('es_suspendido', false)
         .eq('es_activo', true)
@@ -249,7 +246,6 @@ export async function crearCliente(input: ClienteAltaInput): Promise<RespuestaAc
             id_tipo_cliente: d.id_tipo_cliente,
             id_lista_precio: d.id_lista_precio,
             id_canal_venta: aNull(d.id_canal_venta),
-            id_ruta_cobro: aNull(d.id_ruta_cobro),
             id_vendedor_asignado: aNull(d.id_vendedor_asignado),
             tiene_credito: d.tiene_credito,
             limite_credito: d.tiene_credito ? aMonto(d.limite_credito) : null,
@@ -439,7 +435,6 @@ export async function editarCliente(
             id_tipo_cliente: d.id_tipo_cliente,
             id_lista_precio: d.id_lista_precio,
             id_canal_venta: aNull(d.id_canal_venta),
-            id_ruta_cobro: aNull(d.id_ruta_cobro),
             id_vendedor_asignado: aNull(d.id_vendedor_asignado),
             tiene_credito: d.tiene_credito,
             limite_credito: d.tiene_credito ? aMonto(d.limite_credito) : null,

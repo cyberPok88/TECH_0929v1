@@ -27,6 +27,12 @@
 // ⚠️ `aria-expanded` es obligatorio: el estado abierto/cerrado no puede vivir solo en el
 // giro del icono. `aria-label` describe la ACCIÓN sobre el sujeto («Contraer la partida 1»),
 // no el icono.
+//
+// ⭐ PROMOCIÓN 05 Oct 2026 — **el botón también sabe ABRIR**: con `abreDialogo` anuncia
+// `aria-haspopup="dialog"` y **suelta el `aria-expanded`** (que mentiría: diría «no desplegado»
+// de algo que abre una ventana), el verbo pasa a «Abrir…» y el icono no gira.
+// Lo estrena el chevron de Recepción, que abre el detalle de la entrada en un modal
+// (Guía 1.6 · artefacto 10 `10-detalle-entrada.html`).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { ChevronRight } from 'lucide-react'
@@ -44,6 +50,15 @@ export interface BotonDespliegueProps {
     tamano?: 'md' | 'sm'
     /** `id` del contenedor que se muestra/oculta — `aria-controls`. */
     controles?: string
+    /**
+     * ⭐ PROMOCIÓN 05 Oct 2026 — **el gesto no siempre DESPLIEGA: a veces ABRE un diálogo.**
+     * Con `abreDialogo` el botón: anuncia `aria-haspopup="dialog"`, **suelta `aria-expanded`**
+     * (si no queda en `false` y miente), cambia el verbo del nombre accesible a «Abrir…» y
+     * **el icono no gira** (no hay estado abierto/cerrado que mostrar).
+     */
+    abreDialogo?: boolean
+    /** El verbo del nombre accesible cuando abre un diálogo. */
+    verboAbrir?: string
     className?: string
 }
 
@@ -53,16 +68,25 @@ export function BotonDespliegue({
     sujeto,
     tamano = 'md',
     controles,
+    abreDialogo = false,
+    verboAbrir = 'Abrir el detalle de',
     className,
 }: BotonDespliegueProps) {
+    /** El nombre accesible describe la ACCIÓN sobre el sujeto, no el icono. */
+    const etiqueta = abreDialogo
+        ? `${verboAbrir} ${sujeto}`
+        : abierto
+          ? `Contraer ${sujeto}`
+          : `Desplegar ${sujeto}`
     return (
         <button
             type="button"
             onClick={onAlternar}
-            aria-expanded={abierto}
-            aria-controls={controles}
-            aria-label={abierto ? `Contraer ${sujeto}` : `Desplegar ${sujeto}`}
-            title={abierto ? `Contraer ${sujeto}` : `Desplegar ${sujeto}`}
+            aria-expanded={abreDialogo ? undefined : abierto}
+            aria-haspopup={abreDialogo ? 'dialog' : undefined}
+            aria-controls={abreDialogo ? undefined : controles}
+            aria-label={etiqueta}
+            title={etiqueta}
             className={cn(
                 'inline-flex shrink-0 items-center justify-center rounded',
                 // Ley 5: 44px de dedo en móvil dentro de la fila del kit; en la tabla de
@@ -77,7 +101,11 @@ export function BotonDespliegue({
         >
             <ChevronRight
                 aria-hidden="true"
-                className={cn('size-3.5 transition-transform duration-150', abierto && 'rotate-90')}
+                className={cn(
+                    'size-3.5 transition-transform duration-150',
+                    // Con `abreDialogo` no hay estado abierto/cerrado: el chevron no gira.
+                    !abreDialogo && abierto && 'rotate-90'
+                )}
             />
         </button>
     )

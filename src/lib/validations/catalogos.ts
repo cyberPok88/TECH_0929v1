@@ -80,6 +80,14 @@ export const listaPrecioCrearSchema = z.object({
   clave: claveSchema,
   nombre: nombreSchema,
   porcentajeAjustePorciento: ajustePorcientoSchema,
+  /**
+   * ⭐ LOS 2 BOTONES (dueño, 05 Oct 2026 · `g12_a4_b1`): `descuento` baja el precio, `incremento`
+   * lo sube. El % **siempre es positivo** (el CHECK de la columna es `>= 0 AND < 1`), así que el
+   * SIGNO lo da este campo — nunca el número.
+   * ⚠️ `.default('descuento')` es lo que hace que las listas viejas (y el form sin tocar el botón)
+   *    sigan descontando: sin él, un `''` del formulario **no** cae al default y la lista no guarda.
+   */
+  tipoAjuste: z.enum(['descuento', 'incremento']).default('descuento'),
   es_lista_default: z.boolean().default(false),
   es_activo: activoSchema,
 })

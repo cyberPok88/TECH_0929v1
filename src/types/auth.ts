@@ -5,6 +5,8 @@
 // Cambiar un nombre aquí rompe el runtime sin error de compilación.
 // ============================================================================
 
+import type { PreferenciasAyudas } from '@/types/ayudas'
+
 // ── Modos internos del LoginForm (Parte 4) ─────────────────────────────────
 export type LoginStep = 'login' | 'register' | 'loading'
 
@@ -29,7 +31,10 @@ export interface Usuario {
     email: string
     telefono: string | null
     // JSONB con DEFAULT '{"tema":"obsidiana"}' — contrato Guía 0.6 (ThemeInjector)
-    preferencias: { tema: string }
+    // ⭐ MEJORA 47 (04 Oct 2026): el JSONB **crece** — `ayudas` es la preferencia de
+    //    las descripciones de pantalla (por módulo y por categoría). Opcional a
+    //    propósito: las filas que ya existen no la tienen y el defecto es **ver**.
+    preferencias: { tema: string; ayudas?: PreferenciasAyudas }
     // Override del rol; si NULL, la BD usa el alcance del rol (COALESCE en la SQL)
     alcance_datos: AlcanceDatos | null
     // Requerido solo si alcance_datos = 'marca' (CHECK de la columna)

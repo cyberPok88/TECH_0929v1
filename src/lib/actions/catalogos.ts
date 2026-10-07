@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import type {
   ImpuestoFila, UnidadMedidaFila, CategoriaFila, CatalogoSimpleFila,
   MarcaComercialFila, MarcaProductoFila, TipoClienteFila, ListaPrecioFila,
-  RutaCobroFila, UbicacionAlmacenFila, VendedorFila,
+  UbicacionAlmacenFila, VendedorFila,
   RespuestaLista,
 } from '@/types/catalogos'
 
@@ -69,13 +69,6 @@ export async function listarListasPrecio(): Promise<RespuestaLista<ListaPrecioFi
   const sb = await cliente(); const { data, error } = await sb.from('listas_precios').select('*').order('clave', { ascending: true })
   if (error) return { success: false as never, data: [] }
   return { success: true, data: (data ?? []) as ListaPrecioFila[] }
-}
-
-// --- Rutas de cobro ---
-export async function listarRutasCobro(): Promise<RespuestaLista<RutaCobroFila>> {
-  const sb = await cliente(); const { data, error } = await sb.from('rutas_cobro').select('*').order('nombre', { ascending: true })
-  if (error) return { success: false as never, data: [] }
-  return { success: true, data: (data ?? []) as RutaCobroFila[] }
 }
 
 // --- Ubicaciones del almacén ---
@@ -311,7 +304,13 @@ export async function crearListaPrecio(input: unknown): Promise<RespuestaAccion>
   }
   const { error } = await sb.from('listas_precios').insert({
     clave: parsed.data.clave, nombre: parsed.data.nombre,
-    porcentaje_ajuste: parsed.data.porcentajeAjustePorciento / 100,
+    // 🔴 FIX 05 Oct 2026 — la columna es **`porcentaje_descuento`**, NO `porcentaje_ajuste`.
+    //    `tipos_cliente` SÍ tiene `porcentaje_ajuste` (por eso el nombre se copió mal acá):
+    //    escribir la columna equivocada daba «Could not find the 'porcentaje_ajuste' column of
+    //    'listas_precios' in the schema cache» y **no dejaba guardar ninguna lista**.
+    porcentaje_descuento: parsed.data.porcentajeAjustePorciento / 100,
+    // ⭐ El TIPO (g12_a4_b1): el % de arriba baja o sube. Lo consumen las 3 fórmulas de venta.
+    tipo_ajuste: parsed.data.tipoAjuste,
     es_lista_default: parsed.data.es_lista_default, es_activo: parsed.data.es_activo,
   })
   if (error) return { success: false, error: error.message }
@@ -325,7 +324,11 @@ export async function editarListaPrecio(id: string, input: unknown): Promise<Res
     await sb.from('listas_precios').update({ es_lista_default: false }).eq('es_lista_default', true)
   }
   const { error } = await sb.from('listas_precios').update({
-    nombre: parsed.data.nombre, porcentaje_ajuste: parsed.data.porcentajeAjustePorciento / 100,
+    // 🔴 FIX 05 Oct 2026 — mismo defecto que en el insert (ver arriba): la columna de
+    //    `listas_precios` es `porcentaje_descuento`.
+    nombre: parsed.data.nombre, porcentaje_descuento: parsed.data.porcentajeAjustePorciento / 100,
+    // ⭐ El TIPO (g12_a4_b1): sin esto, cambiar de descuento a incremento no se guardaba.
+    tipo_ajuste: parsed.data.tipoAjuste,
     es_lista_default: parsed.data.es_lista_default, es_activo: parsed.data.es_activo,
   }).eq('id', id)
   if (error) return { success: false, error: error.message }
@@ -384,11 +387,31 @@ export async function editarCategoria(id: string, input: unknown): Promise<Respu
   const nombre = texto(input, 'nombre')
   if (!nombre) return { success: false, error: 'El nombre es obligatorio' }
   const sb = await cliente()
+  const idPadre = (input as Record<string, unknown>)?.id_categoria_padre
+  const padreId = idPadre ? String(idPadre) : null
+
+  // ⭐ 05 Oct 2026 — el tope de 2 niveles AHORA también vive en la BD (`tr_categorias_no_anidar`,
+  // migración `g12_a1_b1`). Estas guardas son el MENSAJE: sin ellas el usuario recibiría el texto
+  // crudo del trigger. `crearCategoria` ya las tenía; `editarCategoria` no validaba nada.
+  if (padreId === id) return { success: false, error: 'Una categoría no puede ser su propio padre' }
+  if (padreId) {
+    const { data: padre } = await sb.from('categorias_producto')
+      .select('id_categoria_padre').eq('id', padreId).maybeSingle()
+    if (padre?.id_categoria_padre) {
+      return { success: false, error: 'Máximo 2 niveles: la categoría padre ya es una subcategoría' }
+    }
+    const { data: hijos } = await sb.from('categorias_producto')
+      .select('id').eq('id_categoria_padre', id).limit(1)
+    if (hijos && hijos.length > 0) {
+      return { success: false, error: 'Máximo 2 niveles: esta categoría tiene subcategorías y no puede volverse subcategoría' }
+    }
+  }
+
   const { error } = await sb.from('categorias_producto').update({
     nombre,
     descripcion: texto(input, 'descripcion') || null,
     orden: numero(input, 'orden'),
-    id_categoria_padre: (input as Record<string, unknown>)?.id_categoria_padre ? String((input as Record<string, unknown>).id_categoria_padre) : null,
+    id_categoria_padre: padreId,
     esquema_atributos: jsonArray(input, 'esquema_atributos'),
     es_activo: booleano(input, 'es_activo'),
   }).eq('id', id)
@@ -408,8 +431,8 @@ export async function cambiarEstadoCategoria(id: string, activo: boolean): Promi
   return { success: true }
 }
 
-// ===== P7 — verbos: rutas de cobro + ubicaciones del almacén =====
-// Selector de cobradores: cualquier usuario activo (patrón D4 — sin filtro por rol).
+// ===== P7 — verbo: ubicaciones del almacén =====
+// Usuarios activos (patrón D4 — sin filtro por rol): selector por nombre de otras superficies.
 export async function listarUsuariosActivos(): Promise<{ success: boolean; data: { id: string; nombre: string }[] }> {
   const sb = await cliente()
   const { data, error } = await sb.from('usuarios')
@@ -423,42 +446,6 @@ export async function listarUsuariosActivos(): Promise<{ success: boolean; data:
     nombre: (u as { nombre_completo: string }).nombre_completo,
   }))
   return { success: true, data: filas }
-}
-
-// --- Rutas de cobro ---
-export async function crearRutaCobro(input: unknown): Promise<RespuestaAccion> {
-  const nombre = texto(input, 'nombre')
-  if (!nombre) return { success: false, error: 'El nombre es obligatorio' }
-  const idCobrador = (input as Record<string, unknown>)?.id_cobrador_asignado
-  const sb = await cliente()
-  const { error } = await sb.from('rutas_cobro').insert({
-    clave: texto(input, 'clave') || nombre,
-    nombre,
-    descripcion: texto(input, 'descripcion') || null,
-    id_cobrador_asignado: idCobrador ? String(idCobrador) : null,
-    es_activo: booleano(input, 'es_activo'),
-  })
-  if (error) return { success: false, error: error.message }
-  return { success: true }
-}
-export async function editarRutaCobro(id: string, input: unknown): Promise<RespuestaAccion> {
-  const nombre = texto(input, 'nombre')
-  if (!nombre) return { success: false, error: 'El nombre es obligatorio' }
-  const idCobrador = (input as Record<string, unknown>)?.id_cobrador_asignado
-  const sb = await cliente()
-  const { error } = await sb.from('rutas_cobro').update({
-    nombre,
-    descripcion: texto(input, 'descripcion') || null,
-    id_cobrador_asignado: idCobrador ? String(idCobrador) : null,
-    es_activo: booleano(input, 'es_activo'),
-  }).eq('id', id)
-  if (error) return { success: false, error: error.message }
-  return { success: true }
-}
-export async function cambiarEstadoRutaCobro(id: string, activo: boolean): Promise<RespuestaAccion> {
-  const sb = await cliente(); const { error } = await sb.from('rutas_cobro').update({ es_activo: activo }).eq('id', id)
-  if (error) return { success: false, error: error.message }
-  return { success: true }
 }
 
 // --- Ubicaciones del almacén (4 niveles) ---
