@@ -85,6 +85,15 @@ import type { ToolbarAction } from '@/types/shell'
 
 const RUTA = '/dashboard/sistema/usuarios'
 
+/**
+ * ⭐ FIX 10 Oct 2026 (`g09_p3_b9`) — **la contraseña del DUEÑO no se rota desde este CRUD.**
+ * Medido: un administrador abrió «Cambiar contraseña» sobre la cuenta del dueño y **lo dejó
+ * fuera del sistema** (sus sesiones se cierran al rotar la contraseña). La defensa **real**
+ * vive en `cambiarPasswordUsuario` (rechaza la cuenta `es_admin_principal`); esto es la
+ * cortesía que evita el toast de error. El dueño la cambia en «Mi perfil» (0.11).
+ */
+const TITULO_CONTRASENA_DUENO = 'La contraseña del dueño del sistema se cambia desde «Mi perfil»'
+
 type ConfirmacionPendiente =
     | { tipo: 'estado'; usuario: UsuarioLista }
     | { tipo: 'archivar'; usuario: UsuarioLista }
@@ -249,21 +258,25 @@ export default function Page() {
                     : undefined,
         })
 
-        // Cambiar contraseña — mismas reglas que Editar (una fila, no tu cuenta).
+        // Cambiar contraseña — mismas reglas que Editar (una fila, no tu cuenta),
+        // ⭐ y tampoco la cuenta del DUEÑO (`g09_p3_b9`): la defensa real está en la action.
         base.push({
             id: 'cambiar_contrasena',
             label: 'Cambiar contraseña',
             icon: KeyRound,
             accion: 'editar',
             variant: 'outline',
-            disabled: !esUnica || unico?.id === usuarioSesionId,
+            disabled:
+                !esUnica || unico?.id === usuarioSesionId || unico?.es_admin_principal === true,
             title: !esUnica
                 ? 'Selecciona un usuario para cambiar su contraseña'
                 : unico?.id === usuarioSesionId
                   ? tituloBloq
-                  : undefined,
+                  : unico?.es_admin_principal
+                    ? TITULO_CONTRASENA_DUENO
+                    : undefined,
             onClick:
-                esUnica && unico && unico.id !== usuarioSesionId
+                esUnica && unico && unico.id !== usuarioSesionId && !unico.es_admin_principal
                     ? () => setCambiarPassUsuario(unico)
                     : undefined,
         })
@@ -454,7 +467,10 @@ export default function Page() {
                                   icon: KeyRound,
                                   label: 'Cambiar contraseña',
                                   dataAccion: 'cambiar-password',
-                                  disabled: (u: UsuarioLista) => u.id === usuarioSesionId,
+                                  // ⭐ `g09_p3_b9`: la cuenta del DUEÑO tampoco — rotarla la deja
+                                  // fuera del sistema. La defensa real está en la Server Action.
+                                  disabled: (u: UsuarioLista) =>
+                                      u.id === usuarioSesionId || u.es_admin_principal,
                                   onClick: (u: UsuarioLista) => setCambiarPassUsuario(u),
                               },
                               {

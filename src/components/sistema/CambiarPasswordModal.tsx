@@ -16,8 +16,15 @@
 // contraseña con setPassword() dentro de un useEffect — la regla
 // react-hooks/set-state-in-effect lo marca como error. El estado vive en
 // CambiarPasswordContenido (montado SOLO con el Dialog abierto — Radix lo
-// desmonta al cerrar) y nace con useState perezoso (() => generarPassword()):
+// desmonta al cerrar) y nace con useState perezoso:
 // cada apertura es un montaje nuevo, sin efectos que seteen estado.
+//
+// ⭐ FIX 10 Oct 2026 (`g09_p3_b9`) — EL CAMPO NACE **VACÍO**, y es la parte que
+// importa: antes nacía con `() => generarPassword()`, o sea **lleno y ya válido**,
+// así que **dos clics sin escribir nada** rotaban la contraseña de esa fila y
+// cerraban sus sesiones. Medido: así se rotó la del DUEÑO y quedó fuera del
+// sistema. Vacío, «Confirmar» queda deshabilitado hasta que alguien escriba una
+// o la genere **a propósito** (botón ⟳). El inicializador sigue siendo perezoso.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useState } from 'react'
@@ -83,7 +90,14 @@ function CambiarPasswordContenido({
 }: CambiarPasswordContenidoProps) {
     // useState perezoso: en el montaje (cada apertura) nace una contraseña ya
     // generada y válida — sin setState en efectos (react-hooks/set-state-in-effect).
-    const [password, setPassword] = useState<string>(() => generarPassword())
+    /**
+     * ⭐ FIX 10 Oct 2026 (`g09_p3_b9`) — **arranca VACÍA**. Con la contraseña ya generada, el
+     * botón de confirmar quedaba habilitado desde el primer segundo: dos clics sin escribir nada
+     * rotaban la contraseña y **cerraban las sesiones** de esa persona (así se rotó la del dueño).
+     * Vacía, hay que **escribirla o generarla a propósito** (`regenerar`), y `guardar()` no corre
+     * mientras `validarPassword('')` no pase.
+     */
+    const [password, setPassword] = useState<string>('')
     const [enviando, setEnviando] = useState(false)
     const [errorServidor, setErrorServidor] = useState('')
 
@@ -146,11 +160,18 @@ function CambiarPasswordContenido({
                         size="icon"
                         onClick={regenerar}
                         disabled={enviando}
-                        aria-label="Regenerar contraseña"
+                        aria-label={password ? 'Regenerar contraseña' : 'Generar contraseña'}
+                        title={password ? 'Regenerar' : 'Generar una'}
                     >
                         <RefreshCw className="h-4 w-4" />
                     </Button>
                 </div>
+                {password === '' && (
+                    <p className="text-[11.5px] leading-snug text-muted-foreground">
+                        Escribila o generá una con el botón ⟳. <b>Nada se cambia hasta que confirmes</b>
+                        : al rotarla, esa persona queda fuera de su sesión.
+                    </p>
+                )}
                 <PasswordRequirements validation={passwordValidation} show={password.length > 0} />
             </div>
 

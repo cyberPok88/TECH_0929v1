@@ -248,6 +248,26 @@ export async function cambiarPasswordUsuario(
         return { success: false, error: 'Usa "Mi perfil" para cambiar tu propia contraseña.' }
     }
 
+    // ⭐ FIX 10 Oct 2026 (`g09_p3_b9`) — **la cuenta del DUEÑO tampoco, y ESTA es la defensa
+    // real** (la UI solo deshabilita el botón). Medido: un administrador rotó la contraseña del
+    // dueño desde este CRUD y **lo dejó fuera del sistema** — al rotar la contraseña se cierran
+    // las sesiones de esa cuenta. El dueño la cambia en /dashboard/perfil (0.11), donde sí
+    // re-verifica la actual. Fail-closed: si no se puede verificar, no se toca nada.
+    const { data: objetivo, error: errorObjetivo } = await supabase
+        .from('usuarios')
+        .select('es_admin_principal')
+        .eq('id', id)
+        .maybeSingle()
+    if (errorObjetivo) {
+        return { success: false, error: 'No se pudo verificar la cuenta. Intenta de nuevo.' }
+    }
+    if (objetivo?.es_admin_principal) {
+        return {
+            success: false,
+            error: 'La contraseña del dueño del sistema solo la cambia el dueño desde «Mi perfil».',
+        }
+    }
+
     const admin = createAdminClient()
     const { error } = await admin.auth.admin.updateUserById(id, {
         password: nuevaPassword,
