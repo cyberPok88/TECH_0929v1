@@ -7,6 +7,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { describirErrorTexto } from '@/lib/utils/errores'
 import type {
     AuthActionResponse,
     CerrarSesionResponse,
@@ -33,12 +34,12 @@ export async function iniciarSesionAction(
         ) {
             return { success: false, error: 'Correo o contraseña incorrectos.' }
         }
-        return { success: false, error: error.message }
+        return { success: false, error: describirErrorTexto(error) }
     }
 
     // Sesión creada: obtener la sesión completa en el mismo request
     const { data, error: sesionError } = await supabase.rpc('obtener_sesion_completa')
-    if (sesionError) return { success: false, error: sesionError.message }
+    if (sesionError) return { success: false, error: describirErrorTexto(sesionError) }
 
     const sesion = data as SesionCompletaResponse
 
@@ -95,7 +96,7 @@ export async function registrarseAction(
             }
         }
 
-        return { success: false, error: error.message }
+        return { success: false, error: describirErrorTexto(error) }
     }
 
     // Confirm email ON: no hay sesión todavía. El registro SÍ fue exitoso —
@@ -108,7 +109,7 @@ export async function registrarseAction(
     // transacción (creó su perfil si era el primer usuario).
     const { data: sesionData, error: sesionError } =
         await supabase.rpc('obtener_sesion_completa')
-    if (sesionError) return { success: false, error: sesionError.message }
+    if (sesionError) return { success: false, error: describirErrorTexto(sesionError) }
 
     const sesion = sesionData as SesionCompletaResponse
 
@@ -137,7 +138,7 @@ export async function registrarseAction(
 export async function rehidratarSesionAction(): Promise<SesionCompletaResponse> {
     const supabase = await createClient()
     const { data, error } = await supabase.rpc('obtener_sesion_completa')
-    if (error) return { error: true, mensaje: error.message }
+    if (error) return { error: true, mensaje: describirErrorTexto(error) }
     return data as SesionCompletaResponse
 }
 

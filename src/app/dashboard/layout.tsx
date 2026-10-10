@@ -20,6 +20,7 @@
 import { redirect } from 'next/navigation'
 
 import { AuthWrapper } from '@/components/auth/AuthWrapper'
+import { AvisosEntradas } from '@/components/entradas/AvisosEntradas'
 import { FiltrosBar, Footer, Sidebar, Toolbar, Topbar } from '@/components/shell'
 import { PrimerIngresoBanner } from '@/components/shell/PrimerIngresoBanner'
 import { RBACGuard } from '@/components/shell/RBACGuard'
@@ -92,6 +93,16 @@ export default async function DashboardLayout({
 
                     <div className="flex min-w-0 flex-1 flex-col">
                         <Topbar />
+
+                        {/* ⭐ MEJORA 53 (09 Oct 2026) — EL ESCUCHA DE AVISOS EN TIEMPO REAL.
+                            No pinta nada: se suscribe a `entradas` y `liberaciones_entrada` por
+                            Realtime y avisa por toast al operario al que le acaba de caer trabajo
+                            (y despierta su cola). Vive ACÁ y no en el módulo de Entradas porque el
+                            técnico, el acondicionador y el almacenista no están siempre dentro de
+                            `/dashboard/entradas/**`: su menú incluye el panel.
+                            ⚠️ Va junto al Topbar —fuera del `<main>`— para no tocar el contenedor
+                            de scroll del Shell; es hermano de los Operarios, no parte de ellos. */}
+                        <AvisosEntradas />
                         <Toolbar />
 
                         {/* ⭐ Guía 0.6 (Decisión 25 · 01 Sep 2026) — FiltrosBar:

@@ -8,6 +8,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError, describirErrorTexto } from '@/lib/utils/errores'
 import {
     convertirAtributosCrudos,
     productoSchema,
@@ -162,10 +163,32 @@ async function resolverClaveUnidadSAT(
 }
 
 function traducirErrorProducto(codigo: string | undefined, mensaje: string): string {
-    if (codigo === '23505') return 'Ya existe un producto con ese código de barras.'
+    if (codigo === '23505') {
+        /**
+         * ⭐ FIX 08 Oct 2026 (VF del dueño) — **el `23505` NO siempre es el código de barras.**
+         *
+         * `productos` tiene **TRES** índices únicos —`productos_sku_key` · `productos_codigo_barras_unique`
+         * (parcial) y `uq_productos_clave_huella` (parcial)— y este traductor culpaba **siempre** al
+         * código de barras. El dueño lo reportó con sus palabras: *«me dice que ya hay un producto con
+         * ese código de barras (**dato que no hemos visto**) y no es determinante para el SKU»* — la
+         * colisión real era la **huella** (el mismo producto capturado dos veces). Un mensaje que
+         * nombra el campo equivocado manda a revisar donde no es.
+         *
+         * ⇒ Se lee la **restricción** del mensaje del motor (PostgREST la incluye) y se dice la verdad.
+         * Si el motor no la nombra, el mensaje enumera las tres sin mentir.
+         */
+        if (mensaje.includes('uq_productos_clave_huella')) {
+            return 'Ya existe un producto con ESA MISMA HUELLA (misma categoría, marca y atributos). Búscalo en el catálogo en vez de crearlo otra vez.'
+        }
+        if (mensaje.includes('productos_codigo_barras_unique')) {
+            return 'Ya existe un producto con ese código de barras.'
+        }
+        if (mensaje.includes('productos_sku_key')) return 'Ya existe un producto con ese SKU.'
+        return 'Ese producto ya existe: el SKU, el código de barras o la huella están repetidos.'
+    }
     if (codigo === '23503') return 'Alguna referencia seleccionada no existe (marca/categoría/impuesto).'
     if (codigo === '42501') return 'No tienes permiso para realizar esta acción.'
-    return mensaje
+    return describirError({ message: mensaje, code: codigo }) ?? mensaje
 }
 
 /** Esquema efectivo de la categoría: el de la fila si no está vacío; si la fila es
@@ -179,7 +202,7 @@ async function esquemaDeCategoria(
         .select('id_categoria_padre, esquema_atributos')
         .eq('id', idCategoria)
         .maybeSingle()
-    if (error || !categoria) return { esquema: [], error: error?.message ?? 'La categoría no existe.' }
+    if (error || !categoria) return { esquema: [], error: describirError(error) ?? 'La categoría no existe.' }
     const propio = (categoria.esquema_atributos ?? []) as AtributoEsquema[]
     if (propio.length > 0) return { esquema: propio, error: null }
     if (categoria.id_categoria_padre) {
@@ -230,7 +253,7 @@ export async function listarProductos(
     }
 
     const { data, error } = await query.order('nombre', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const productos = ((data ?? []) as unknown as FilaProductoCruda[]).map(aFila)
     return { success: true, data: productos }
@@ -246,7 +269,7 @@ export async function obtenerProducto(id: string): Promise<RespuestaDato<Product
         .eq('id', id)
         .maybeSingle()
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     if (!data) return { success: false, error: 'El producto no existe.' }
 
     return { success: true, data: aFila(data as unknown as FilaProductoCruda) }
@@ -255,7 +278,7 @@ export async function obtenerProducto(id: string): Promise<RespuestaDato<Product
 // ── Crear (Parte 3 · folio P-###### · validación contra el esquema de la categoría)
 export async function crearProducto(
     input: unknown
-): Promise<RespuestaDato<{ id: string; sku: string }>> {
+): Promise<RespuestaDato<{ id: string; sku: string; existente?: boolean }>> {
     const parsed = productoSchema.safeParse(input)
     if (!parsed.success) {
         return { success: false, error: parsed.error.issues[0]?.message ?? 'Datos no válidos.' }
@@ -282,7 +305,7 @@ export async function crearProducto(
     if (errFolio || !sku) {
         return {
             success: false,
-            error: errFolio?.message ?? 'No se pudo generar el SKU del producto.',
+            error: describirError(errFolio) ?? 'No se pudo generar el SKU del producto.',
         }
     }
 
@@ -320,7 +343,30 @@ export async function crearProducto(
         .select('id, sku')
         .single()
 
-    if (error) return { success: false, error: traducirErrorProducto(error.code, error.message) }
+    if (error) {
+        /**
+         * ⭐ FIX 08 Oct 2026 (VF del dueño) — **si el rebote es la HUELLA, se REUTILIZA el producto.**
+         *
+         * Es la doctrina que el módulo ya tiene escrita en `crearProductoRapido` (R54): la BD es la
+         * autoridad y el índice único `uq_productos_clave_huella` **es** la garantía. Rebotar con un
+         * error dejaba al puesto atorado (el cotejo no podía cerrar el alta) y encima le hablaba de un
+         * campo que nadie capturó. Se resuelve por la **CLAVE** —la misma regla de la BD— y se
+         * devuelve el existente con `existente: true`, igual que el alta rápida: **el que abrió el
+         * formulario lo deja seleccionado y sigue**.
+         */
+        if (error.code === '23505' && error.message.includes('uq_productos_clave_huella')) {
+            const { data: existente } = await supabase.rpc('producto_por_clave_huella', {
+                p_id_categoria: d.id_categoria,
+                p_id_marca: d.id_marca,
+                p_atributos: atributos,
+            })
+            const fila = (Array.isArray(existente) ? existente[0] : null) as
+                | { id: string; sku: string }
+                | null
+            if (fila) return { success: true, data: { id: fila.id, sku: fila.sku, existente: true } }
+        }
+        return { success: false, error: traducirErrorProducto(error.code, error.message) }
+    }
     return { success: true, data: { id: fila.id as string, sku: fila.sku as string } }
 }
 
@@ -328,7 +374,7 @@ export async function crearProducto(
 export async function listarMarcasPorCategoria(
     idCategoria: string
 ): Promise<
-    RespuestaLista<{ id: string; nombre: string; es_activo: boolean }>
+    RespuestaLista<{ id: string; nombre: string; es_activo: boolean; alias: string[] }>
 > {
     const supabase = await createClient()
 
@@ -351,20 +397,60 @@ export async function listarMarcasPorCategoria(
 
     const { data, error } = await supabase
         .from('marcas_categorias')
-        .select('marcas_producto(id, nombre, es_activo)')
+        // ⭐ 09 Oct 2026 (`g12_a6_b1`) — `alias` viaja SIEMPRE: es lo que permite que el nombre con el
+        // que el LECTOR nombra a la marca («WD») resuelva a la marca del catálogo («Western Digital»)
+        // en vez de crear un duplicado. Ver `WizardRevision.asegurarMarca`.
+        .select('marcas_producto(id, nombre, es_activo, alias)')
         .in('id_categoria', ids)
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
-    const vistos = new Map<string, { id: string; nombre: string; es_activo: boolean }>()
+    const vistos = new Map<string, { id: string; nombre: string; es_activo: boolean; alias: string[] }>()
     for (const filaRel of (data ?? []) as unknown as {
-        marcas_producto: { id: string; nombre: string; es_activo: boolean }[] | { id: string; nombre: string; es_activo: boolean } | null
+        marcas_producto:
+            | { id: string; nombre: string; es_activo: boolean; alias: string[] | null }[]
+            | { id: string; nombre: string; es_activo: boolean; alias: string[] | null }
+            | null
     }[]) {
         const cruda = filaRel.marcas_producto
         const marca = Array.isArray(cruda) ? cruda[0] : cruda
-        if (marca && !vistos.has(marca.id)) vistos.set(marca.id, marca)
+        // `alias` es NOT NULL con default '{}' en la BD; el `?? []` es por el tipo del embed, no por dato.
+        if (marca && !vistos.has(marca.id)) vistos.set(marca.id, { ...marca, alias: marca.alias ?? [] })
     }
     const marcas = [...vistos.values()].sort((a, b) => a.nombre.localeCompare(b.nombre))
     return { success: true, data: marcas }
+}
+
+// ── Las LÍNEAS de una MARCA (catálogo `lineas_producto` · MEJORA 52 · `g12_a5_b1`)
+/**
+ * ⭐ MEJORA 52 (07 Oct 2026) — **las píldoras de la LÍNEA**.
+ *
+ * El atributo `linea` (presente en los 33 Tipos, `en_huella: true`, **no requerido**) NO tiene sus
+ * valores en el esquema: los saca del **catálogo**, **filtrados por la MARCA elegida** — porque las
+ * líneas de Western Digital (Blue · Purple · Black…) **no aplican** a Seagate (Barracuda · IronWolf…).
+ * Por eso el esquema marca ese atributo con `opciones_por_marca: true`.
+ *
+ * Se guarda el **NOMBRE** como texto (no el id): así `fn_clave_huella` sigue leyendo el valor del
+ * esquema sin cambiar una línea.
+ */
+export async function listarLineasPorMarca(
+    idMarca: string | null | undefined
+): Promise<RespuestaLista<{ id: string; nombre: string }>> {
+    if (!idMarca) return { success: true, data: [] }
+    const supabase = await createClient()
+    const { data, error } = await supabase
+        .from('lineas_producto')
+        .select('id, nombre')
+        .eq('id_marca', idMarca)
+        .eq('es_activo', true)
+        .order('nombre')
+    if (error) return { success: false, error: describirError(error) }
+    return {
+        success: true,
+        data: ((data ?? []) as { id: string; nombre: string }[]).map((l) => ({
+            id: l.id,
+            nombre: l.nombre,
+        })),
+    }
 }
 
 // ── Crear marca y vincularla a categorías (RPC b6 · marca al vuelo del flujo)
@@ -381,7 +467,7 @@ export async function crearMarcaConCategorias(
         p_id_categorias: idCategorias,
     })
     if (error) {
-        if (error.code === 'P0001') return { success: false, error: error.message }
+        if (error.code === 'P0001') return { success: false, error: describirError(error) }
         return { success: false, error: 'No se pudo crear la marca: sin permiso.' }
     }
     return { success: true, data: String(idMarca) }
@@ -404,7 +490,7 @@ export async function buscarClaveSAT(
         .order('clave', { ascending: true })
         .limit(20)
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const claves = (data ?? []).map((f) => ({
         id: (f as { id: string }).id,
         clave: (f as { clave: string }).clave,
@@ -520,7 +606,7 @@ export async function listarSustitutos(idProducto: string): Promise<RespuestaLis
         .from('productos_sustitutos')
         .select('id_producto_sustituto')
         .eq('id_producto', idProducto)
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const ids = (data ?? []).map((f) => f.id_producto_sustituto as string)
     if (ids.length === 0) return { success: true, data: [] }
     const { data: productos, error: err2 } = await supabase
@@ -528,7 +614,7 @@ export async function listarSustitutos(idProducto: string): Promise<RespuestaLis
         .select('id, sku, nombre, id_categoria, atributos')
         .in('id', ids)
         .order('nombre', { ascending: true })
-    if (err2) return { success: false, error: err2.message }
+    if (err2) return { success: false, error: describirError(err2) }
     return { success: true, data: (productos ?? []) as unknown as ProductoOpcion[] }
 }
 
@@ -607,9 +693,56 @@ export async function buscarProductosPorAtributos(
         if (valor) query = query.eq(`atributos->>${clave}`, valor)
     }
 
+    /**
+     * ⭐ FIX 09 Oct 2026 (decisión del dueño · *«tu recomendación»*) — **LA HUELLA INCOMPLETA NO
+     * MATCHEA LO COMPLETO.**
+     *
+     * El defecto, medido: los filtros de arriba sólo miran **las claves que la huella TRAE**. Una
+     * huella **sin `linea`** (el técnico no la eligió —es opcional, R59—) matcheaba igual un producto
+     * **con** línea: `WD · PC · 2TB` sin línea encontraba el `WD · PC · 2TB · Purple`. Y el selector de
+     * SKU **auto-selecciona cuando hay un solo candidato** ⇒ el sistema daba por bueno un producto
+     * **sin haber determinado la línea**, en silencio. Contradice R59 (*«vacía no afecta la huella»*:
+     * vacía es **una** huella, no comodín).
+     *
+     * ⇒ Una clave `en_huella` que la huella **no trae** se exige **ausente** también en el producto.
+     * ⚠️ Se resuelve en JS y no con un `IS NULL` de PostgREST a propósito: la autoridad del modelo es
+     * **`fn_clave_huella`**, que descarta los valores `null` **y los `''`** (`where valor is not null`)
+     * ⇒ `''` y «ausente» son **la MISMA clave** y tienen que ser **el mismo match**. Un `IS NULL` en
+     * SQL habría dejado afuera al producto guardado con `linea: ''`.
+     *
+     * ⚠️ **Lo que NO cambia:** la lista de candidatos sigue acotada a 50 (por nombre) **antes** de este
+     * filtro, así que en un catálogo enorme y con una huella muy ambigua un match exacto podría quedar
+     * fuera de la ventana. Es aceptable **porque la garantía no vive acá**: el alta de un producto
+     * resuelve por la **CLAVE** con `producto_por_clave_huella` (R54) y **reutiliza** — nunca duplica.
+     * La búsqueda es comodidad; la BD es la garantía.
+     *
+     * ⚠️ Y por eso es seguro endurecerla globalmente: sus únicos consumidores son los DOS caminos que
+     * necesitan exactitud — el selector de SKU del alta y el find-or-create de `crearProductoRapido`.
+     * **Ningún filtro del catálogo la usa.**
+     */
+    let clavesAusentes: string[] = []
+    if (criterios.id_categoria) {
+        const { data: cat } = await supabase
+            .from('categorias_producto')
+            .select('esquema_atributos')
+            .eq('id', criterios.id_categoria)
+            .maybeSingle()
+        clavesAusentes = ((cat?.esquema_atributos ?? []) as AtributoEsquema[])
+            .filter((a) => a.en_huella)
+            .map((a) => a.clave)
+            .filter((k) => !huella[k])
+    }
+
     const { data, error } = await query.order('nombre', { ascending: true }).limit(50)
-    if (error) return { success: false, error: error.message }
-    return { success: true, data: (data ?? []) as unknown as ProductoOpcion[] }
+    if (error) return { success: false, error: describirError(error) }
+    const candidatos = (data ?? []) as unknown as (ProductoOpcion & {
+        atributos?: Record<string, unknown> | null
+    })[]
+    const sinValor = (v: unknown): boolean => v === undefined || v === null || String(v).trim() === ''
+    const exactos = clavesAusentes.length
+        ? candidatos.filter((p) => clavesAusentes.every((k) => sinValor(p.atributos?.[k])))
+        : candidatos
+    return { success: true, data: exactos as unknown as ProductoOpcion[] }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -865,7 +998,7 @@ export async function importarProductosCSV(
             if (errInsert.code === '23505') {
                 errores.push({ fila: numeroFila, error: `Código de barras "${codigoBarras || '?'}" duplicado.` })
             } else {
-                errores.push({ fila: numeroFila, error: errInsert.message })
+                errores.push({ fila: numeroFila, error: describirErrorTexto(errInsert) })
             }
             continue
         }
@@ -894,7 +1027,7 @@ export async function listarClavesSAT(
         .from(tabla)
         .select('*')
         .order('clave', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const claves = (data ?? []).map((f) => ({
         id: (f as { id: string }).id,
         clave: (f as { clave: string }).clave,
@@ -966,7 +1099,7 @@ export async function listarProductosActivos(
     }
 
     const { data, error } = await query.order('nombre', { ascending: true }).limit(50)
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: (data ?? []) as unknown as ProductoOpcion[] }
 }
 
@@ -984,7 +1117,7 @@ export async function listarCategoriasSelector(): Promise<RespuestaLista<OpcionC
         .select('id, nombre, id_categoria_padre, esquema_atributos')
         .eq('es_activo', true)
         .order('nombre', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const filas = (data ?? []) as unknown as {
         id: string

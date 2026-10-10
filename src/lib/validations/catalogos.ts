@@ -92,3 +92,19 @@ export const listaPrecioCrearSchema = z.object({
   es_activo: activoSchema,
 })
 export const listaPrecioEditarSchema = listaPrecioCrearSchema.omit({ clave: true })
+
+// ===== ⭐ ANEXIÓN 09 Oct 2026 — formas de pago SAT (la pide 1.9 Cobros) =====
+// ⚠️ La etiqueta es `descripcion` (no `nombre`): es el nombre LITERAL de la tabla de la
+//    fundación. La `clave` son los códigos del SAT (`01` · `02` · … · `99`): 2 dígitos,
+//    que `claveSchema` acepta (solo letras/números/guion bajo) y NO se rellenan solos.
+const descripcionSchema = z
+  .string({ required_error: 'La descripción es obligatoria' })
+  .min(1, 'La descripción es obligatoria')
+  .max(120, 'Máximo 120 caracteres')
+
+export const formaPagoCrearSchema = z.object({
+  clave: claveSchema,
+  descripcion: descripcionSchema,
+  es_activo: activoSchema,
+})
+export const formaPagoEditarSchema = formaPagoCrearSchema.omit({ clave: true })

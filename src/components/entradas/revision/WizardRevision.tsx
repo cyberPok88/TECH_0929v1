@@ -56,8 +56,8 @@ import { Pildora } from '@/components/data-table'
 import { Spinner } from '@/components/ui/spinner'
 import { cn } from '@/lib/utils'
 
-import { listarMarcasPorCategoria } from '@/lib/actions/productos'
-import { aLectura, atributosDesdeDisco, capacidadTextoDesdeGb } from '@/lib/lector-discos'
+import { crearMarcaConCategorias, listarLineasPorMarca, listarMarcasPorCategoria } from '@/lib/actions/productos'
+import { aLectura, atributosDesdeDisco, capacidadTextoDesdeGb, desvioDeCapacidad } from '@/lib/lector-discos'
 import type { NsTanda } from '@/types/entradas'
 import { CapturaNsTanda } from '@/components/entradas/revision/CapturaNsTanda'
 import { PanelLectorDiscos, type EstadoPanel, type ItemRonda } from '@/components/entradas/revision/PanelLectorDiscos'
@@ -108,6 +108,25 @@ interface PiezaEnRonda {
     tono: 'exito' | 'peligro' | 'advertencia'
 }
 
+/**
+ * ⭐ FIX 08 Oct 2026 (lo pidió el dueño en la VF) — **la descripción de una partida declarada**.
+ *
+ * *«En la descripción, por ejemplo, solo dice Partida 1 HDD — falta ahí poner la capacidad.»* Y tiene
+ * razón: dos partidas de la MISMA categoría (una de 1TB y otra de 2TB) se leían **idénticas**, así que
+ * elegir el turno era adivinar. La `capacidad` va **primero** (es el discriminador real) y el resto de
+ * lo declarado después, con las claves **ordenadas** porque `atributos` es `jsonb` y Postgres no
+ * conserva el orden.
+ */
+function describirAtributosDePartida(at: Record<string, unknown> | null | undefined): string {
+    const pares = Object.keys(at ?? {})
+        .sort()
+        .map((k) => [k, String((at as Record<string, unknown>)[k] ?? '').trim()] as const)
+        .filter(([, v]) => v !== '')
+    const capacidad = pares.filter(([k]) => k === 'capacidad')
+    const resto = pares.filter(([k]) => k !== 'capacidad')
+    return [...capacidad, ...resto].map(([, v]) => v).join(' · ')
+}
+
 export function WizardRevision({
     open,
     onOpenChange,
@@ -146,7 +165,7 @@ export function WizardRevision({
      * venga la salida del botón, de la `×`, del velo o de `Esc`.
      */
     const [salidaPendiente, setSalidaPendiente] = useState<'lista' | 'cerrar' | null>(null)
-    const [marcas, setMarcas] = useState<{ id: string; nombre: string }[]>([])
+    const [marcas, setMarcas] = useState<{ id: string; nombre: string; alias: string[] }[]>([])
     const [atributos, setAtributos] = useState<Record<string, string | string[]>>({})
     /** La ronda: lo que se acumula y se escribe UNA vez al guardar. */
     const [ronda, setRonda] = useState<PiezaEnRonda[]>([])
@@ -226,6 +245,18 @@ export function WizardRevision({
     /** Huella = atributos de recepción (snapshot) + revisión + automáticos. */
     const construirHuella = useCallback((): Record<string, string | string[]> => {
         const huella: Record<string, string | string[]> = { ...atributos }
+        /**
+         * ⭐ FIX 08 Oct 2026 — **con LECTOR, la LÍNEA no entra por acá: es de la PIEZA.**
+         *
+         * Los atributos `opciones_por_marca` (hoy `linea`) viajan **en la fila de la ronda de cada
+         * disco**, porque un turno puede traer un WD Blue y un Seagate Barracuda. Si el valor general
+         * entrara en la huella, **pisaría la elección de cada disco** — el defecto que reportó el
+         * dueño (*«a lo mejor una es Barracuda y otro no»*). En la captura a mano el editor general
+         * sigue mandando: ahí se agrega una pieza a la vez.
+         */
+        if (usaLector) {
+            for (const at of esquema.filter((a) => a.opciones_por_marca)) delete huella[at.clave]
+        }
         for (const d of defaults) {
             // ⭐ MEJORA 44 — la LECTURA manda: si el disco ya dijo el dato (un disco de
             // 5425 rpm no es de 7200), el `valor_default` NO lo pisa. El default queda
@@ -234,7 +265,7 @@ export function WizardRevision({
             huella[d.clave] = d.valor_default as string
         }
         return huella
-    }, [atributos, defaults])
+    }, [atributos, defaults, esquema, usaLector])
 
     const cargarPartidas = useCallback(async (idEntrada: string) => {
         const r = await listarPartidasConAvance(idEntrada)
@@ -323,13 +354,77 @@ export function WizardRevision({
         let activo = true
         void listarMarcasPorCategoria(partidaActual.id_categoria).then((r) => {
             if (activo && r.success) {
-                setMarcas((r.data ?? []).filter((m) => m.es_activo).map((m) => ({ id: m.id, nombre: m.nombre })))
+                setMarcas(
+                    (r.data ?? [])
+                        .filter((m) => m.es_activo)
+                        .map((m) => ({ id: m.id, nombre: m.nombre, alias: m.alias ?? [] }))
+                )
             }
         })
         return () => {
             activo = false
         }
     }, [open, partidaActual?.id_categoria])
+
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026, decisión del dueño) — **LA PUERTA DE LA MARCA.**
+     *
+     * *«la que muestra la lectura debe ser alguna de las de la lista de marcas, si no hay es dar de
+     * alta la marca para poder usarla o ponerla»*. **Hoy esa puerta no existía**: si la lectura traía
+     * una marca fuera del catálogo, el wizard avisaba *«elegila a mano»* y asignaba `id_marca = ''`
+     * — pero con lector **el select de marca no se pinta** ⇒ el disco **no se podía registrar**, y el
+     * mensaje mandaba a hacer algo que esa pantalla no permitía.
+     *
+     * Devuelve el id de la marca (la que ya estaba, o la recién creada) y `null` si no se pudo: en ese
+     * caso **no se registra nada** (no se arma una pieza a medias).
+     * El alta va por `crearMarcaConCategorias` → RPC `registrar_marca_con_categorias`, que es
+     * **SECURITY DEFINER** y la tiene concedida `authenticated` ⇒ el técnico puede darla de alta.
+     */
+    const asegurarMarca = useCallback(
+        async (nombre: string | null | undefined): Promise<string | null> => {
+            const limpio = (nombre ?? '').trim()
+            if (!limpio) return null
+            /**
+             * ⭐ 09 Oct 2026 (`g12_a6_b1` · decisión del dueño) — **SE COMPARA TAMBIÉN POR ALIAS.**
+             *
+             * El caso, de su VF: *«justo es para poner una de esas y usar y **prevenir por ejemplo WD a
+             * western digital**»*. El **agente** ya traduce el modelo al nombre del catálogo
+             * (`REGLAS_MARCA`: `^(WDC|WD)\b|… → "Western Digital"`), pero **del lado de la app no había
+             * red**: esto comparaba **sólo por nombre** y, al no encontrarlo, **CREABA la marca** ⇒ un
+             * nombre no previsto producía una **marca duplicada** y con ella **dos huellas (dos SKU)**
+             * del mismo disco — el descuadre que este proyecto persigue en todas partes.
+             *
+             * ⚠️ Se comparan **las dos formas sin distinguir mayúsculas** (nombre y cada alias): la
+             * marca del catálogo manda y el alias es su puerta de entrada. Si de verdad no hay ninguna
+             * que corresponda, se sigue dando de alta (la **marca al vuelo**, que es comportamiento
+             * legítimo y documentado): lo que cambia es que ya no se inventa una por un alias.
+             */
+            const clave = limpio.toLowerCase()
+            const coincide = (m: { nombre: string; alias: string[] }) =>
+                m.nombre.toLowerCase() === clave ||
+                (m.alias ?? []).some((a) => a.trim().toLowerCase() === clave)
+            const ya = marcas.find(coincide)
+            if (ya) return ya.id
+            const idCat = partidaActual?.id_categoria
+            if (!idCat) return null
+            const res = await crearMarcaConCategorias(limpio, [idCat])
+            if (!res.success || !res.data) {
+                toast.error(res.error ?? `No se pudo dar de alta la marca «${limpio}».`)
+                return null
+            }
+            toast.success(`Marca «${limpio}» dada de alta en la categoría`)
+            // Se relee el catálogo de la categoría: la marca nueva tiene que quedar elegible ya.
+            const r = await listarMarcasPorCategoria(idCat)
+            const lista = r.success
+                ? (r.data ?? [])
+                      .filter((m) => m.es_activo)
+                      .map((m) => ({ id: m.id, nombre: m.nombre, alias: m.alias ?? [] }))
+                : []
+            setMarcas(lista)
+            return lista.find(coincide)?.id ?? res.data
+        },
+        [marcas, partidaActual?.id_categoria]
+    )
 
     const cambiarPartida = (id: string) => {
         setPartidaSel(id)
@@ -364,8 +459,177 @@ export function WizardRevision({
         formateando: false,
         expulsando: false,
         sinRegistrar: 0,
+        marcaComun: null,
     })
     const alCambiarPanel = useCallback((e: EstadoPanel) => setEstadoPanel(e), [])
+
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **LA LÍNEA, con píldoras del catálogo.**
+     *
+     * El atributo `linea` vive en los 33 Tipos (`en_huella: true`, **no requerido**, `opciones_por_marca`),
+     * pero sus valores **no están en el esquema**: salen del **catálogo `lineas_producto`, filtrado por la
+     * MARCA** — las líneas de WD (Blue · Purple · Black…) no aplican a Seagate (Barracuda · IronWolf…).
+     * Se selecciona con **píldoras**, **ninguna por defecto**, y **vacía NO afecta la huella**.
+     *
+     * ¿Con qué marca se cargan? Con la que el wizard PUEDE ver:
+     *   · vía MANUAL (RAM / ingreso directo) → la marca que el técnico elige (`marcaSel`)
+     *   · vía LECTOR → la **marca común de los discos leídos** (la reporta el panel en su estado):
+     *     el wizard no ve los discos, y el catálogo es POR MARCA.
+     * Si los discos no comparten marca, no se ofrecen líneas: se registra por tandas de una misma
+     * línea, que es como el técnico trabaja (*«todos los de una capacidad y luego otra»*).
+     */
+    const [lineasDe, setLineasDe] = useState<{ marca: string; items: { id: string; nombre: string }[] }>({
+        marca: '',
+        items: [],
+    })
+    /**
+     * ⚠️ FIX 07 Oct 2026 (cazado por la VF del dueño) — **el catálogo se pide por el ID de la marca,
+     * y con lector solo teníamos el NOMBRE.**
+     *
+     * El panel reporta `marcaComun` con la marca **tal como la dice el disco** (`"Seagate"`, que es lo
+     * que el agente deduce del modelo) y `listarLineasPorMarca` consulta `id_marca` — un **UUID**.
+     * ⇒ Se pedía `id_marca = 'Seagate'`, salían **0 filas** y la pantalla decía *«esta marca no tiene
+     * líneas cargadas»* **con el catálogo lleno** (Seagate tenía sus 5). **No era la semilla: era esto.**
+     * Se resuelve contra las marcas **de la categoría**, que el wizard ya carga para el select manual
+     * (y que es la misma lista con la que `asegurarMarca` decide si hay que dar de alta la marca).
+     */
+    const marcaNombreEnCurso =
+        (marcaSel ? marcas.find((m) => m.id === marcaSel)?.nombre : '') || estadoPanel.marcaComun || ''
+    const idMarcaParaLinea =
+        marcaSel ||
+        marcas.find((m) => {
+            // ⭐ 09 Oct 2026 (`g12_a6_b1`) — también por ALIAS: el panel reporta la marca **como la dice
+            // el disco** («WD»), y sin esto las líneas de esa marca no aparecían aunque existieran.
+            const n = (estadoPanel.marcaComun ?? '').trim().toLowerCase()
+            return m.nombre.toLowerCase() === n || (m.alias ?? []).some((a) => a.trim().toLowerCase() === n)
+        })?.id ||
+        ''
+    useEffect(() => {
+        if (!open || !idMarcaParaLinea) return
+        let activo = true
+        void listarLineasPorMarca(idMarcaParaLinea).then((r) => {
+            // Se guarda CON su marca: así el render nunca muestra las líneas de la marca anterior
+            // mientras la nueva carga (y no hace falta limpiar el estado dentro del efecto).
+            if (activo && r.success) setLineasDe({ marca: idMarcaParaLinea, items: r.data ?? [] })
+        })
+        return () => {
+            activo = false
+        }
+    }, [open, idMarcaParaLinea])
+    /** Las líneas de la marca EN CURSO (vacío si todavía no llegaron o no hay marca). */
+    const lineas = idMarcaParaLinea && lineasDe.marca === idMarcaParaLinea ? lineasDe.items : []
+
+    /**
+     * Las píldoras de la LÍNEA (los atributos con `opciones_por_marca`; hoy, `linea`).
+     * Se pintan en **las dos vías** —con lector y a mano— porque es **identidad que el disco no sabe**.
+     * **Opcional**: tocar la píldora elegida la apaga (queda vacía) y **vacía no afecta la huella**.
+     */
+    const lineasDelEsquema = esquema.filter((a) => a.opciones_por_marca)
+    const editorLinea =
+        lineasDelEsquema.length > 0 ? (
+            <div className="space-y-1.5">
+                {lineasDelEsquema.map((at) => (
+                    <div key={at.clave} className="space-y-1">
+                        <Label className="text-[11px]">
+                            {at.etiqueta}{' '}
+                            <span className="font-normal text-muted-foreground">(opcional)</span>
+                        </Label>
+                        {lineas.length === 0 ? (
+                            <p className="text-[11px] text-muted-foreground">
+                                {idMarcaParaLinea
+                                    ? `«${marcaNombreEnCurso}» no tiene líneas cargadas en el catálogo (se editan en 1.0 Catálogos).`
+                                    : marcaNombreEnCurso
+                                      ? `«${marcaNombreEnCurso}» todavía no está en las marcas de la categoría, así que no tiene líneas.`
+                                      : 'Elegí la marca —o leé los discos— para ver sus líneas.'}
+                            </p>
+                        ) : (
+                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                {lineas.map((l) => {
+                                    const sel = atributos[at.clave] === l.nombre
+                                    return (
+                                        <button
+                                            key={l.id}
+                                            type="button"
+                                            disabled={cargando}
+                                            aria-pressed={sel}
+                                            title={sel ? 'Tocar de nuevo para dejarla vacía' : undefined}
+                                            onClick={() =>
+                                                setAtributos((prev) => ({
+                                                    ...prev,
+                                                    [at.clave]: sel ? '' : l.nombre,
+                                                }))
+                                            }
+                                            className={`rounded-md border px-2 py-1 text-xs transition disabled:opacity-50 ${
+                                                sel
+                                                    ? 'border-primary bg-primary/10 font-medium text-foreground'
+                                                    : 'border-border text-muted-foreground hover:border-primary/50'
+                                            }`}
+                                        >
+                                            {l.nombre}
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </div>
+        ) : null
+
+    /**
+     * ⭐ FIX 08 Oct 2026 — **LA LÍNEA ES DE LA PIEZA, no del turno.**
+     *
+     * Lo cazó el dueño en la VF: *«en el modal donde pregunta la línea, eso es un dato que debe
+     * seleccionársele **por disco**, no en general — a lo mejor una es Barracuda y otro no»*. Y tiene
+     * razón: la línea es **identidad de la pieza** (R59 la mete en la huella), así que un turno con un
+     * WD Blue y un Seagate Barracuda producía **una sola huella** con la línea del primero — o sea, un
+     * SKU equivocado para uno de los dos discos.
+     *
+     * El catálogo es **por marca** (las líneas de WD no aplican a Seagate), así que se cargan las
+     * líneas de **cada marca presente en la ronda** — una vez por marca, no por pieza.
+     */
+    const [lineasPorMarca, setLineasPorMarca] = useState<Record<string, { id: string; nombre: string }[]>>({})
+    useEffect(() => {
+        if (!open) return
+        const marcasEnRonda = [
+            ...new Set(ronda.map((r) => r.pieza.id_marca).filter((m): m is string => !!m)),
+        ]
+        const faltan = marcasEnRonda.filter((m) => !(m in lineasPorMarca))
+        if (faltan.length === 0) return
+        let activo = true
+        void Promise.all(
+            faltan.map(async (idMarca) => {
+                const r = await listarLineasPorMarca(idMarca)
+                return [idMarca, (r.success ? r.data : []) ?? []] as const
+            })
+        ).then((pares) => {
+            if (!activo) return
+            setLineasPorMarca((prev) => ({ ...prev, ...Object.fromEntries(pares) }))
+        })
+        return () => {
+            activo = false
+        }
+    }, [open, ronda, lineasPorMarca])
+
+    /**
+     * La línea de **UNA** pieza de la ronda. Se escribe en `pieza.atributos[clave]` — que es lo que
+     * `guardarAvanceRevision` agrupa por huella: con líneas distintas, **dos huellas y dos SKU**.
+     */
+    const cambiarAtributoDePieza = useCallback((indice: number, clave: string, valor: string) => {
+        setRonda((prev) =>
+            prev.map((r, i) =>
+                i === indice
+                    ? {
+                          ...r,
+                          pieza: {
+                              ...r.pieza,
+                              atributos: { ...(r.pieza.atributos ?? {}), [clave]: valor },
+                          },
+                      }
+                    : r
+            )
+        )
+    }, [])
 
     /** ¿Hay algo del panel que se pierda al descartar el turno? */
     const panelConRiesgo = estadoPanel.formateando || estadoPanel.expulsando || estadoPanel.sinRegistrar > 0
@@ -451,24 +715,71 @@ export function WizardRevision({
      * el técnico decida. Mandarla a devolución con un motivo que el taller no avaló sería
      * inventar una devolución (regla del aval, 30 Sep 2026).
      */
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **de qué es la PARTIDA**, para avisar si un disco no lo es.
+     *
+     * ⚠️ Sale de **la PARTIDA** (`partidaActual.atributos`), **NUNCA de `atributos`** — que es el estado
+     * de la RONDA y `registrarRonda` lo **sobreescribe con lo que dijo el disco**. Ese era el defecto que
+     * cazó el dueño: al registrar, «lo declarado» pasaba a ser «lo medido» ⇒ el aviso **desaparecía**; y
+     * al guardar el avance se recargaba lo declarado y **reaparecía**. El aviso tiene que estar **desde la
+     * lectura**, que es cuando el técnico decide.
+     */
+    const opcionesCapacidad = useMemo(
+        () => esquema.find((a) => a.clave === 'capacidad')?.opciones ?? [],
+        [esquema]
+    )
+    const capacidadDeclaradaDeLaPartida = useMemo(
+        () =>
+            typeof partidaActual?.atributos?.capacidad === 'string'
+                ? (partidaActual.atributos.capacidad as string)
+                : null,
+        [partidaActual]
+    )
+
     const registrarRonda = useCallback(
-        (items: ItemRonda[]) => {
+        async (items: ItemRonda[]) => {
             if (items.length === 0) return
             if (items.length > restantes - ronda.length) {
                 toast.error(`Solo quedan ${Math.max(0, restantes - ronda.length)} pieza(s) por revisar en esta partida.`)
                 return
             }
+            /**
+             * ⭐ MEJORA 52 — **la marca se resuelve o se da de alta ANTES de armar las piezas.**
+             * Con lector no hay select de marca: si la del disco no estaba en el catálogo, la pieza
+             * nacía con `id_marca = ''` (y el guardado del concentrado la rechazaba). Si alguna no se
+             * puede resolver, **no se registra NADA**: media ronda es peor que ninguna.
+             */
+            const idPorNombre = new Map<string, string>()
+            for (const it of items) {
+                const nombre = (it.disco.marca ?? '').trim()
+                if (!nombre) continue
+                if (idPorNombre.has(nombre.toLowerCase())) continue
+                const id = await asegurarMarca(nombre)
+                if (!id) {
+                    toast.error(`Sin marca no se puede registrar «${nombre}»: revisá el catálogo de la categoría.`)
+                    return
+                }
+                idPorNombre.set(nombre.toLowerCase(), id)
+            }
             const nuevas: PiezaEnRonda[] = []
             const lecturasNuevas: LecturaEntrada[] = []
             for (const it of items) {
                 const d = it.disco
-                const m = marcas.find((x) => x.nombre.toLowerCase() === (d.marca ?? '').toLowerCase())
-                if (!m && d.marca) {
-                    toast.error(`La marca «${d.marca}» no está en el catálogo: elegila a mano.`)
-                }
-                const idMarca = m?.id ?? ''
+                const idMarca = idPorNombre.get((d.marca ?? '').trim().toLowerCase()) ?? ''
+                const marcaNombre = marcas.find((m) => m.id === idMarca)?.nombre ?? d.marca ?? '—'
                 const leidos = atributosDesdeDisco(d, esquema)
                 const huella = { ...construirHuella(), ...leidos }
+                /**
+                 * ⭐ MEJORA 52 — **la marca viaja con la pieza.** Si el disco no es de lo que declara la
+                 * partida, se guarda el desvío (medido vs declarado) para que el guardado sepa que esta
+                 * pieza **va por el camino de la reclasificación**. El técnico ya lo vio **en rojo, al
+                 * leer** — antes de registrarla.
+                 */
+                const desvio = desvioDeCapacidad(
+                    d.capacidad_texto,
+                    capacidadDeclaradaDeLaPartida,
+                    opcionesCapacidad
+                )
                 const sinAval = it.veredicto === 'SIN_AVAL'
                 const esPasa = it.veredicto === 'PASA'
                 nuevas.push({
@@ -479,13 +790,23 @@ export function WizardRevision({
                         resultado: esPasa ? 'PASA' : 'NO_PASA',
                         id_motivo: esPasa ? undefined : it.motivoRechazoId,
                         porcentaje_salud: esPasa ? undefined : d.salud.puntaje ?? undefined,
+                        desvio,
+                        /* ⭐ MEJORA 52 — la DECISIÓN del técnico viaja con la pieza (y con el desvío). */
+                        reclasificar: desvio ? it.reclasificar === true : false,
+                        /**
+                         * ⭐ MEJORA 52 — **la pieza reclasificada viaja con SU NS**, que es lo que permite
+                         * que su número de serie quede apuntando a **la partida nueva** (decisión D5) sin
+                         * depender del orden del concentrado: el concentrado solo garantiza las CANTIDADES,
+                         * no a qué pieza pertenece cada NS.
+                         */
+                        ns: desvio && it.reclasificar ? (d.serial ?? undefined) : undefined,
                     },
-                    lectura: aLectura(d, partidaSel, idMarca),
-                    marcaNombre: m?.nombre ?? d.marca ?? '—',
+                    lectura: aLectura(d, partidaSel, idMarca, it.contexto),
+                    marcaNombre,
                     etiqueta: esPasa ? 'PASA' : sinAval ? 'REVISAR' : 'NO PASA',
                     tono: esPasa ? 'exito' : sinAval ? 'advertencia' : 'peligro',
                 })
-                if (d.serial) lecturasNuevas.push(aLectura(d, partidaSel, idMarca))
+                if (d.serial) lecturasNuevas.push(aLectura(d, partidaSel, idMarca, it.contexto))
             }
             setRonda((prev) => [...prev, ...nuevas])
             setLecturas((prev) => [...prev, ...lecturasNuevas])
@@ -497,7 +818,8 @@ export function WizardRevision({
                 return acc
             })
         },
-        [marcas, esquema, construirHuella, partidaSel, restantes, ronda.length]
+        [marcas, esquema, construirHuella, partidaSel, restantes, ronda.length, asegurarMarca,
+         capacidadDeclaradaDeLaPartida, opcionesCapacidad]
     )
 
     // ── La puerta manual (RAM / ingreso directo) ───────────────────────────────
@@ -741,7 +1063,24 @@ export function WizardRevision({
                             >
                                 {partidasVisibles.map((p) => {
                                     const elegida = p.id === partidaSel
-                                    const declaradas = p.cantidad_original
+                                    /**
+                                     * ⭐ MEJORA 52 (07 Oct 2026) — **LO QUE HAY QUE REVISAR es el FINAL
+                                     * de la partida, no lo declarado.**
+                                     *
+                                     * Una partida **NACIDA por reclasificación** no tiene NADA declarado
+                                     * (`cantidad_original = 0` — y el CHECK lo garantiza: solo una nacida
+                                     * puede tener 0) pero **SÍ trae piezas que revisar**: su vigente sube
+                                     * al guardar la reclasificación. Con `cantidad_original`, esa fila
+                                     * decía **«0 declaradas · 1 revisadas»** y **«1 / 0»** — los números de
+                                     * la vista de Revisión no cuadraban (cazado por el dueño el 07 Oct).
+                                     *
+                                     * ⚠️ Y `vigente` NO cambia el caso normal: durante la revisión la DEV
+                                     * todavía no se aplica (se aplica al emitir la nota), así que
+                                     * `vigente === original` salvo cuando hubo una reclasificación, que es
+                                     * **exactamente** el caso que esto arregla.
+                                     */
+                                    const esNacida = p.cantidad_original === 0
+                                    const declaradas = Math.max(p.cantidad_vigente ?? 0, p.revisadas)
                                     const revisadas = p.revisadas
                                     const quedan = Math.max(0, p.restantes)
                                     const completa = quedan === 0
@@ -795,9 +1134,20 @@ export function WizardRevision({
                                             <span className="min-w-0 flex-1">
                                                 <span className="block text-[14px] font-semibold leading-snug">
                                                     Partida {p.partida} · {p.categoria_nombre ?? 'sin categoría'}
+                                                    {/* ⭐ FIX 08 Oct 2026 — LA CAPACIDAD, en la descripción. */}
+                                                    {describirAtributosDePartida(p.atributos)
+                                                        ? ` · ${describirAtributosDePartida(p.atributos)}`
+                                                        : ''}
                                                 </span>
                                                 <span className="mt-0.5 block text-[12px] text-muted-foreground">
-                                                    {declaradas} declaradas · {revisadas} revisadas ·{' '}
+                                                    {/* ⭐ FIX 08 Oct 2026 — CUÁNTAS PIEZAS SON, EN GRANDE:
+                                                        es el número con el que el técnico decide qué turno
+                                                        tomar, y estaba al mismo tamaño que el resto. */}
+                                                    <b className="text-[15px] tabular-nums text-foreground">
+                                                        {declaradas}
+                                                    </b>{' '}
+                                                    {esNacida ? 'por reclasificación' : 'declaradas'} ·{' '}
+                                                    {revisadas} revisadas ·{' '}
                                                     {completa ? (
                                                         <b className="text-success">completa</b>
                                                     ) : (
@@ -853,7 +1203,18 @@ export function WizardRevision({
                             onRegistrar={registrarRonda}
                             enRonda={ronda.length}
                             onEstado={alCambiarPanel}
+                            /* ⭐ MEJORA 52 — de qué es la partida, para avisar si un disco NO lo es.
+                               ⚠️ Sale de la PARTIDA, no del estado de la ronda (`atributos`): ese se
+                               sobreescribe con lo que dijo el disco y hacía desaparecer el aviso. */
+                            capacidadDeclarada={capacidadDeclaradaDeLaPartida}
+                            opcionesCapacidad={opcionesCapacidad}
                         />
+
+                        {/* ⭐ FIX 08 Oct 2026 — ACÁ YA NO VA EL EDITOR DE LÍNEA GENERAL.
+                            Con LECTOR la línea es **de cada disco** y se elige en la fila de la ronda
+                            (`lineasPorMarca` abajo): un turno puede traer un WD Blue y un Seagate
+                            Barracuda, y el editor general les daba la MISMA a las dos.
+                            El editor general sigue vivo en la captura a mano (una pieza a la vez). */}
 
                         {/* ⚠️ CAPTURA MANUAL — solo cuando NO hay lector (RAM, ingreso directo).
                             El disco no puede leer una RAM: no tiene SMART.
@@ -909,7 +1270,8 @@ export function WizardRevision({
                                             ))}
                                         </select>
                                     </div>
-                                    {enRevision.map((at) => (
+                                    {editorLinea}
+                                    {enRevision.filter((at) => !at.opciones_por_marca).map((at) => (
                                         <div key={at.clave} className="space-y-1">
                                             <Label className="text-[11px]">
                                                 {at.etiqueta}
@@ -1152,6 +1514,43 @@ export function WizardRevision({
                                             <div key={i} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm">
                                                 <span className="font-mono text-xs text-muted-foreground">{i + 1}</span>
                                                 <span className="font-semibold">{r.marcaNombre}</span>
+                                                {/* ⭐ FIX 08 Oct 2026 — LA LÍNEA DE ESTE DISCO.
+                                                    Un turno puede traer un WD Blue y un Seagate Barracuda:
+                                                    la línea es identidad de la PIEZA y se elige acá, una
+                                                    por disco (las opciones salen del catálogo de SU marca).
+                                                    El disco no la sabe — el agente no la manda. */}
+                                                {lineasDelEsquema.map((at) => {
+                                                    const ops = lineasPorMarca[r.pieza.id_marca ?? ''] ?? []
+                                                    if (ops.length === 0) return null
+                                                    const elegida = String(r.pieza.atributos?.[at.clave] ?? '')
+                                                    return (
+                                                        <select
+                                                            key={at.clave}
+                                                            className={cn(
+                                                                'h-8 shrink-0 rounded-md border bg-surface px-1.5 text-[12px]',
+                                                                elegida
+                                                                    ? 'border-primary/50 font-medium text-foreground'
+                                                                    : 'border-border text-muted-foreground'
+                                                            )}
+                                                            value={elegida}
+                                                            onChange={(e) =>
+                                                                cambiarAtributoDePieza(i, at.clave, e.target.value)
+                                                            }
+                                                            disabled={cargando}
+                                                            aria-label={`${at.etiqueta ?? at.clave} de la pieza ${i + 1}`}
+                                                            title={`${at.etiqueta ?? at.clave} de ESTE disco — es identidad de la pieza`}
+                                                        >
+                                                            <option value="">
+                                                                — {(at.etiqueta ?? at.clave).toLowerCase()} —
+                                                            </option>
+                                                            {ops.map((l) => (
+                                                                <option key={l.id} value={l.nombre}>
+                                                                    {l.nombre}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    )
+                                                })}
                                                 {r.lectura?.ns ? (
                                                     <span className="font-mono text-[12px] text-muted-foreground">
                                                         N/S {r.lectura.ns}

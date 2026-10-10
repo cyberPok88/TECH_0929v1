@@ -227,6 +227,29 @@ export function claveLinea(
 }
 
 /**
+ * ⭐ FIX 08 Oct 2026 — **el NOMBRE SUGERIDO de un producto, a partir de su HUELLA.**
+ *
+ * Vive acá (y no en cada pantalla) porque lo usan **dos caminos que tienen que decir lo mismo**: el
+ * **alta rápida** del cotejo y el **formulario prellenado** que abre «Crear producto». Antes el
+ * formulario abría con el nombre **vacío** y el almacenista lo escribía a mano — teniendo la huella
+ * (marca + atributos) ya resuelta en pantalla, que es exactamente el dato que nombra al producto.
+ *
+ * ⚠️ Los valores salen con las **claves ordenadas**: `atributos` es `jsonb` y Postgres **no conserva
+ * el orden** (la misma razón por la que existe `huellaCanonica`). Sin ordenar, el mismo producto
+ * podía sugerir «PC 2TB» o «2TB PC» según el round-trip.
+ */
+export function nombreDesdeHuella(
+    marcaNombre: string | null | undefined,
+    atributos: Record<string, unknown> | null | undefined
+): string {
+    const vals = Object.keys(atributos ?? {})
+        .sort()
+        .map((k) => String((atributos as Record<string, unknown>)[k] ?? '').trim())
+        .filter(Boolean)
+    return [marcaNombre?.trim(), ...vals].filter(Boolean).join(' ')
+}
+
+/**
  * ⭐ MEJORA 29 — una huella que **solo tiene DEV** (nada aprobado). Antes no podía existir: la marca
  * de la pieza mala se tiraba al agrupar y la DEV se agregaba a la partida. Ahora es una **línea
  * más** del desglose («Corsair · 2 malas») y el padre sigue siendo la suma de sus líneas.
@@ -284,6 +307,31 @@ export interface PartidaConAvance {
     /** Piezas ya revisadas = aprobadas + devueltas. */
     revisadas: number
     restantes: number
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **cuántas piezas SALIERON de esta partida por RECLASIFICACIÓN**:
+     * la lectura dijo que no eran de lo que la entrada declaraba y el técnico decidió crearles su
+     * propia partida (la validó Recepción).
+     *
+     * Existe porque, sin él, el desglose **no cerraba a la vista**: se veía
+     * `RECIBIDAS 5 · DEV — · FINAL 4` con **una pieza sin explicar**. Con esto la cuenta se lee:
+     * **`RECIBIDAS − DEV − RECLASIFICADAS = FINAL`** (y `DEV + RECLASIFICADAS` es lo que se fue).
+     *
+     * ⚠️ **No es una DEV**: la pieza **no vuelve al proveedor** — sigue en el inventario, en la partida
+     * de su capacidad. Por eso se pinta aparte y **no** en rojo.
+     */
+    reclasificadas: number
+    /**
+     * ⭐ MEJORA 52 — **cuántas piezas LLEGARON a esta partida** por reclasificación (la partida que
+     * NACE las recibe). Existe para que la aritmética cierre **también en la nacida**:
+     * `RECIBIDAS 0 + RECLASIFICADAS 1 = FINAL 1` — sin esto, su fila era `0 … 1` sin explicación.
+     */
+    reclasificadas_entran: number
+    /**
+     * ⭐ MEJORA 52 — **cuántas de esas reclasificaciones TODAVÍA esperan a Recepción** (`pendiente`).
+     * Es lo que Recepción tiene que **VER** antes de pulsar «Ajustar y nota»: el acto las valida
+     * (`ajustada` + quién + cuándo), y con una pendiente la nota no debería emitirse a ciegas.
+     */
+    reclasificadas_pendientes: number
     estado_partida: EstadoPartida
 }
 
@@ -414,6 +462,58 @@ export interface ResultadoConsultaNs {
      * alta, o la partida rindió varias huellas y el concentrado no puede decir cuál es este NS.
      */
     productos?: ProductoDeLaPartidaNs[]
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **LA LECTURA de esta pieza**, que es lo que el dueño pidió:
+     * *«si queremos saber datos de un dato específico se escanea el NS y nos muestra los 40 datos de
+     * la lectura»*. El NS es la **llave**; esto es **el archivo de la pieza**.
+     * `null` = la pieza se revisó **sin lector** (o es de una categoría sin SMART: RAM), o el
+     * concentrado es anterior a la MEJORA 44.
+     */
+    lectura?: LecturaNs | null
+}
+
+/**
+ * ⭐ MEJORA 52 — **la lectura del disco, por NS.** Es la evidencia que el agente tomó cuando la pieza
+ * se revisó (`lecturas_disco`, append-only) + el payload crudo, para que **nada se pierda**.
+ *
+ * ⚠️ `capacidad_gb` es **lo que MIDIÓ el lector**: la verdad de la pieza. Si no coincide con lo que la
+ * entrada declaró, es el caso de **reclasificación** (el disco no es de la partida en la que entró).
+ */
+export interface LecturaNs {
+    ns: string
+    ns_windows: string | null
+    modelo: string | null
+    firmware: string | null
+    /** La marca que el agente **dedujo del modelo** (no es la marca de la huella: esa la confirma el técnico). */
+    marca_detectada: string | null
+    marca_confianza: string | null
+    capacidad_gb: number | null
+    rpm: number | null
+    interfaz: string | null
+    es_nvme: boolean
+    horas_uso: number | null
+    encendidos: number | null
+    temperatura_c: number | null
+    salud_veredicto: string | null
+    salud_puntaje: number | null
+    /** `salud_puntaje === 100` con la regla en vigor al momento de leer. */
+    apto: boolean | null
+    /** ¿Esa salud PODÍA decidir? (vino de HDSentinel o del propio disco, no de la fórmula de la casa). */
+    apto_para_decidir: boolean | null
+    requiere_revision: boolean | null
+    salud_motivos: string[] | null
+    sectores_reasignados: number | null
+    sectores_pendientes: number | null
+    sectores_no_corregibles: number | null
+    errores_crc: number | null
+    motor: string | null
+    leido_el: string
+    leido_por: string | null
+    /**
+     * El payload completo del agente (`lectura_cruda`): incluye lo que **no tiene columna** —
+     * `salud.fuente` (hdsentinel/nvme/fórmula), la completitud de la lectura y el atraso de HDSentinel.
+     */
+    cruda: Record<string, unknown> | null
 }
 
 // ── Catálogos de operación ──────────────────────────────────────────────────────
@@ -508,6 +608,25 @@ export interface PiezaRevision {
      * cambio; el wizard ya no lo pide cuando la partida lleva NS.
      */
     ns?: string
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **esta pieza NO es de lo que dice la partida.**
+     *
+     * Lo detecta el LECTOR al comparar la capacidad medida contra la **DECLARADA en la partida** — no
+     * contra lo que se va capturando en la ronda: son dos cosas distintas y confundirlas hacía
+     * **desaparecer el aviso** (cazado por el dueño el 07 Oct: *«esa comprobación debería ser al momento
+     * de la lectura»*).
+     *
+     * Viaja con la pieza para que el guardado sepa que **va por el camino de la RECLASIFICACIÓN**: a la
+     * partida de su capacidad (buscada o creada con el costo heredado), y **la nota tendrá que ajustarse**.
+     */
+    desvio?: { medida: string; declarada: string } | null
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **la decisión del técnico**, aprobada por el dueño: *«si aun detectada
+     * la diferencia **no se elige hacer la partida**, esto crearía **descuadre en inventario**, ya que
+     * **mentiría**»*. Con desvío solo hay dos caminos: **`true` = crea su propia partida** · o la pieza
+     * **se rechaza** (`NO_PASA` + motivo). **No hay tercera vía**, y el panel lo bloquea.
+     */
+    reclasificar?: boolean
 }
 
 /**
@@ -570,6 +689,25 @@ export interface LecturaEntrada {
     motor?: string | null
     /** La lectura cruda del motor (evidencia). */
     smart_raw?: unknown
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **lo que el agente SUGIRIÓ, que antes se tiraba**: la marca
+     * deducida del MODELO del disco (`REGLAS_MARCA` del agente) y su confianza
+     * (`alta` · `media` · `baja` · `nula`, el `CHECK` de la tabla).
+     * ⚠️ No es la marca de la huella: la marca de la huella es la que el técnico **confirma**
+     * (`id_marca`). Ésta es la **evidencia** de qué sugirió el agente y con cuánta seguridad.
+     */
+    marca_detectada?: string | null
+    marca_confianza?: string | null
+    /**
+     * ⭐ MEJORA 52 — **la lectura del agente como EVIDENCIA COMPLETA**, en 3 bloques:
+     * `{ payload }` el objeto del agente (con `salud.fuente`, la marca sugerida y el SMART crudo),
+     * `{ mediciones }` las 8 que **no deciden** y por eso no son columna, y `{ contexto }` la
+     * metadata de la respuesta (motor · HDSentinel · atraso · completitud de la lectura).
+     *
+     * Existe para que **ningún campo que el agente sume mañana se pierda ni exija una migración**.
+     * ⚠️ **NO entra en la huella** (44.e): si entrara, cada lectura multiplicaría SKUs.
+     */
+    lectura_cruda?: Record<string, unknown> | null
 }
 
 /** Avance de revisión de UNA partida (las piezas que el técnico firma al guardar). */
@@ -753,6 +891,15 @@ export interface CotejoLinea {
     cantidad_pendiente: number
     costo_acordado: number
     /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **lo que la PUERTA declaró**: si la partida se identifica por
+     * número de serie (`partidas_entrada.lleva_ns`).
+     *
+     * Existe para que el **alta del SKU** no invente `maneja_numero_serie`: un disco creado desde el
+     * cotejo nacía con `false` y **salía del inventario sin pedir su NS** (`RegistrarSalidaDialog`
+     * lo lee, y Ventas también). El flujo nuevo (Camino B) lo trae `false` a propósito.
+     */
+    lleva_ns: boolean
+    /**
      * ⭐ MEJORA 25 — solo en el alta de una TANDA: el id de la fila de `liberaciones_entrada` que
      * se marca `confirmada` al dar el alta. En el alta clásica (por entrada) va `undefined`.
      */
@@ -836,7 +983,21 @@ export const TEXTO_ETAPA_REVISION: Record<EstadoEntrada, string> = {
     ajustada: 'Otra etapa',
     en_acondicionamiento: 'Otra etapa',
     en_almacen: 'Otra etapa',
-    confirmada: 'Otra etapa',
+    /**
+     * 🔴 FIX 09 Oct 2026 (VF del dueño: cerró las entradas y el estado seguía diciendo «Otra etapa»)
+     * — **acá NO hay otra etapa: la entrada TERMINÓ.**
+     *
+     * Las tres filas de arriba dicen «Otra etapa» y es **verdad**: la revisión ya no es suya y la
+     * mercancía sigue su camino. `confirmada` es el **final del flujo** — `fecha_fin_almacen`, los
+     * lotes escritos y la nota `recibida`—: mandarla a «otra etapa» manda al puesto a **buscar una
+     * etapa que no existe**.
+     *
+     * ⚠️ **No es un revival del error del 25 Sep.** Ahí `ajustada` decía «Cerrada» y **no** lo estaba
+     * (la entrada seguía esperando acondicionamiento y almacén): el defecto era decir **cerrada de
+     * más**. Acá el defecto es el **opuesto** —decir «otra etapa» de lo que ya cerró—, y `Cerrada` es
+     * literalmente el hecho consumado.
+     */
+    confirmada: 'Cerrada',
     bloqueada_por_divergencia: 'Bloqueada',
 }
 
@@ -884,7 +1045,8 @@ export const TEXTO_ETAPA_RECEPCION: Record<EstadoEntrada, string> = {
     ajustada: 'Nota generada',
     en_acondicionamiento: 'Otra etapa',
     en_almacen: 'Otra etapa',
-    confirmada: 'Otra etapa',
+    /** 🔴 FIX 09 Oct 2026 — el final del flujo NO es «otra etapa» (ver la nota del mapa de Revisión). */
+    confirmada: 'Cerrada',
     bloqueada_por_divergencia: 'Bloqueada',
 }
 

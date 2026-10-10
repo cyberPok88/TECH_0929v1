@@ -4,7 +4,10 @@
 export type ClaveTabCatalogo =
   | 'impuestos' | 'unidades_medida' | 'categorias' | 'canales_venta'
   | 'marcas_comerciales' | 'tipos_cliente'
-  | 'listas_precios' | 'vendedores' | 'marcas_producto' | 'ubicaciones_almacen';
+  | 'listas_precios' | 'vendedores' | 'marcas_producto' | 'ubicaciones_almacen'
+  /** ⭐ ANEXIÓN 09 Oct 2026 — la pestaña que **1.9 Cobros** necesita para el MÉTODO del cobro
+   *  (`sat_formas_pago` era solo lectura y sin UI: el mapa de 1.0 la difería a «V2 / Clientes 1.3»). */
+  | 'formas_pago';
 
 // --- Respuesta uniforme (convención proyecto) ---
 export interface RespuestaLista<T> { data: T[]; success: true }
@@ -48,6 +51,12 @@ export interface AtributoEsquema {
   /** ⭐ 20 Sep 2026: el valor se DERIVA de otro atributo (ej. HDD `tipo` PC→3.5" · LAP→2.5").
    *  Se muestra read-only; nunca se captura. */
   derivado_de?: { clave: string; mapa: Record<string, string> };
+  /** ⭐ MEJORA 52 (07 Oct 2026) — las OPCIONES de este atributo **no están en `opciones`**: salen de
+   *  un **catálogo filtrado por la MARCA**. Hoy lo usa `linea` (`lineas_producto`: WD Blue/Purple/Black ·
+   *  Seagate Barracuda/IronWolf…). La UI lo pinta con **píldoras** y se guarda el **NOMBRE** como texto
+   *  (así `fn_clave_huella` no cambia). Un atributo con esta marca **se pregunta SIEMPRE**, con o sin
+   *  lector: es identidad que **el disco no puede saber**. */
+  opciones_por_marca?: boolean;
 }
 export interface CategoriaFormData {
   nombre: string; descripcion?: string; orden: number;
@@ -60,6 +69,15 @@ export interface CatalogoSimpleFila {
   id: string; clave: string; nombre: string; es_activo: boolean;
   created_at: string | null; updated_at: string | null;
 }
+
+// --- ⭐ Formas de pago SAT (ANEXIÓN 09 Oct 2026 · la pide 1.9 Cobros) ---
+// ⚠️ Su etiqueta es `descripcion`, NO `nombre`: así la nombró la fundación (0.4) y el
+//    nombre es contrato literal (regla 4 de CLAUDE.md). Por eso tiene tipo propio.
+export interface FormaPagoFila {
+  id: string; clave: string; descripcion: string; es_activo: boolean;
+  created_at: string | null; updated_at: string | null;
+}
+export interface FormaPagoFormData { clave: string; descripcion: string; es_activo: boolean }
 
 // --- Marcas comerciales (extiende simple) ---
 export interface MarcaComercialFila {

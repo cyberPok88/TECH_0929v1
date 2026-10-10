@@ -1,4 +1,4 @@
-﻿// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // CONFIGURACIÓN — los contratos de la herramienta de borrado (Guía 2.4 · 05 Oct 2026)
 //
 // Acá viven las DOS listas de paquetes, y NO son la misma cosa:
@@ -42,7 +42,7 @@ export interface PaqueteUI {
 
 /** ⭐ **El orden de la PANTALLA es el de DOMINIO** (no el de la FK, que es el de `PAQUETES`). */
 export const PAQUETES_UI: readonly PaqueteUI[] = [
-    { id: 'entradas', nombre: 'Entradas', ayuda: 'Las entradas y TODO su rastro: partidas, números de serie, lecturas SMART, etapas, devoluciones y divergencias.' },
+    { id: 'entradas', nombre: 'Entradas', ayuda: 'Las entradas y TODO su rastro: partidas, números de serie, lecturas SMART, etapas, devoluciones y divergencias. ⚠️ Reinicia el folio de ingreso: la próxima entrada vuelve a ser ING-0001.' },
     { id: 'compras', nombre: 'Compras', ayuda: 'Notas de compra al proveedor, sus renglones y sus pagos.' },
     { id: 'inventario', nombre: 'Inventario', ayuda: 'Lotes, kardex y conteos físicos. Se deriva de las entradas.' },
     { id: 'productos', nombre: 'Productos', ayuda: 'El catálogo de SKU. ⚠️ Borrarlos no libera el folio: reiniciá los folios o dos productos pueden compartir SKU.' },

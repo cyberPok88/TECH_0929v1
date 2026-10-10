@@ -15,6 +15,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import {
     estadoSchema,
     plantillaCrearSchema,
@@ -155,7 +156,7 @@ function traducirError(codigo: string | undefined, mensaje: string, contexto: 't
     if (codigo === '23503') return 'El tipo de documento seleccionado ya no existe.'
     if (codigo === '23514') return 'Los datos incumplen una regla del sistema (revisa familia y auditoría).'
     if (codigo === '42501') return 'No tienes permiso para administrar plantillas.'
-    return mensaje
+    return describirError({ message: mensaje, code: codigo }) ?? mensaje
 }
 
 async function sesionActiva(
@@ -187,7 +188,7 @@ export async function listarTiposDocumento(
     // Paginación de CLIENTE (PLAN §4): 8 filas — se traen todas y la tabla pagina.
     const { data, error } = await query.order('clave', { ascending: true })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const tipos = ((data ?? []) as unknown as FilaTipoCruda[]).map(aTipo)
     return { success: true, data: tipos, total: tipos.length }
 }
@@ -284,7 +285,7 @@ export async function listarPlantillas(
         .order('es_activo', { ascending: false })
         .order('updated_at', { ascending: false })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     let plantillas = ((data ?? []) as unknown as FilaPlantillaCruda[]).map(aPlantilla)
     // El filtro por familia vive en el TIPO (embed): se aplica después de aplanar.
@@ -302,7 +303,7 @@ export async function obtenerPlantilla(id: string): Promise<RespuestaDato<Planti
         .eq('id', id)
         .maybeSingle()
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     if (!data) return { success: false, error: 'La plantilla no existe o no tienes acceso.' }
 
     return { success: true, data: aPlantilla(data as unknown as FilaPlantillaCruda) }
@@ -392,7 +393,7 @@ export async function listarVersiones(idPlantilla: string): Promise<RespuestaLis
         .eq('id_plantilla', idPlantilla)
         .order('version', { ascending: false })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: (data ?? []) as unknown as VersionPlantilla[] }
 }
 
@@ -419,7 +420,7 @@ export async function restaurarVersion(
         .eq('version', parsed.data.version)
         .maybeSingle()
 
-    if (errHist) return { success: false, error: errHist.message }
+    if (errHist) return { success: false, error: describirError(errHist) }
     if (!historica) return { success: false, error: 'Esa versión no está en el historial.' }
 
     // El `notas_version` deja traza de que esto fue una restauración, no una edición a mano.
@@ -504,7 +505,7 @@ export async function registrarImpresion(
     })
 
     // Un fallo de auditoría NO debe impedir imprimir: se informa y el papel sale igual.
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true }
 }
 
@@ -519,6 +520,6 @@ export async function listarImpresiones(clave: string): Promise<RespuestaLista<I
         .order('created_at', { ascending: false })
         .limit(200)
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: (data ?? []) as unknown as ImpresionDocumento[] }
 }

@@ -14,6 +14,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import { TEMAS, type TemaValue } from '@/types/shell'
 import { TIPOS_AYUDA, type PreferenciasAyudas } from '@/types/ayudas'
 
@@ -56,7 +57,7 @@ export async function guardarTemaAction(tema: TemaValue): Promise<GuardarTemaRes
         .eq('id', user.id)
 
     if (error) {
-        return { success: false, error: error.message }
+        return { success: false, error: describirError(error) }
     }
 
     return { success: true }
@@ -113,7 +114,7 @@ export async function guardarAyudasAction(ayudas: PreferenciasAyudas): Promise<G
         .eq('id', user.id)
 
     if (error) {
-        return { success: false, error: error.message }
+        return { success: false, error: describirError(error) }
     }
 
     return { success: true }

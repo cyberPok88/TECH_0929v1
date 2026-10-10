@@ -11,6 +11,7 @@
 import Decimal from 'decimal.js'
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError, describirErrorTexto } from '@/lib/utils/errores'
 import { entradaSchema, type EntradaInput } from '@/lib/validations/entradas'
 import type {
     BandejaLiberada,
@@ -30,7 +31,9 @@ import type {
     PartidaConAvance,
     PartidaEntrada,
     PartidaResuelta,
+    PiezaRevision,
     ProductoDeLaPartidaNs,
+    LecturaNs,
     ResultadoConsultaNs,
     RespuestaAccion,
     RespuestaDato,
@@ -267,7 +270,7 @@ export async function listarEntradas(
 
     const desde = (pagina - 1) * tamano
     const { data, error, count } = await q.range(desde, desde + tamano - 1)
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: (data as unknown as FilaEntradaCruda[]).map(aFila), total: count ?? 0 }
 }
 
@@ -279,7 +282,7 @@ export async function listarMotivosRechazo(): Promise<RespuestaDato<MotivoRechaz
         .select('id, clave, nombre, requiere_porcentaje')
         .eq('es_activo', true)
         .order('orden', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: data as MotivoRechazo[] }
 }
 
@@ -291,7 +294,7 @@ export async function listarCausasDivergencia(): Promise<RespuestaDato<CausaDive
         .select('id, clave, nombre')
         .eq('es_activo', true)
         .order('orden', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: data as CausaDivergencia[] }
 }
 
@@ -316,7 +319,7 @@ export async function crearEntrada(
     if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? 'Datos inválidos.' }
 
     const { data: folio, error: errFolio } = await supabase.rpc('generar_folio', { p_tipo: 'ING' })
-    if (errFolio) return { success: false, error: errFolio.message }
+    if (errFolio) return { success: false, error: describirError(errFolio) }
 
     const { data: entrada, error: errEntrada } = await supabase
         .from('entradas')
@@ -330,7 +333,7 @@ export async function crearEntrada(
         })
         .select('id, folio')
         .single()
-    if (errEntrada) return { success: false, error: errEntrada.message }
+    if (errEntrada) return { success: false, error: describirError(errEntrada) }
 
     const partidas = parsed.data.partidas.map((p, i) => ({
         id_entrada: entrada.id,
@@ -348,7 +351,7 @@ export async function crearEntrada(
         creado_por: sesion.userId,
     }))
     const { error: errPartidas } = await supabase.from('partidas_entrada').insert(partidas)
-    if (errPartidas) return { success: false, error: errPartidas.message }
+    if (errPartidas) return { success: false, error: describirError(errPartidas) }
 
     return { success: true, data: { id: entrada.id, folio: entrada.folio } }
 }
@@ -385,11 +388,11 @@ export async function editarEntrada(
             actualizado_por: sesion.userId,
         })
         .eq('id', id)
-    if (errCab) return { success: false, error: errCab.message }
+    if (errCab) return { success: false, error: describirError(errCab) }
 
     // Reemplazo de partidas (solo en recién_creada — no hay revisión aún).
     const { error: errDel } = await supabase.from('partidas_entrada').delete().eq('id_entrada', id)
-    if (errDel) return { success: false, error: errDel.message }
+    if (errDel) return { success: false, error: describirError(errDel) }
     const partidas = parsed.data.partidas.map((p, i) => ({
         id_entrada: id,
         partida: i + 1,
@@ -405,7 +408,7 @@ export async function editarEntrada(
         creado_por: sesion.userId,
     }))
     const { error: errPartidas } = await supabase.from('partidas_entrada').insert(partidas)
-    if (errPartidas) return { success: false, error: errPartidas.message }
+    if (errPartidas) return { success: false, error: describirError(errPartidas) }
 
     return { success: true }
 }
@@ -418,7 +421,7 @@ export async function listarPartidasEntrada(idEntrada: string): Promise<Respuest
         .select('id, id_entrada, partida, lleva_ns, id_categoria, categorias_producto(nombre), atributos, cantidad_original, cantidad_vigente, costo_acordado, estado_partida, devoluciones_entrada(cantidad, fecha_ajuste)')
         .eq('id_entrada', idEntrada)
         .order('partida', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const filas = ((data ?? []) as unknown as {
         id: string
         id_entrada: string
@@ -469,7 +472,7 @@ export async function listarPartidasConAvance(idEntrada: string): Promise<Respue
         .select('id, partida, lleva_ns, id_categoria, categorias_producto(nombre), atributos, cantidad_original, cantidad_vigente, costo_acordado, estado_partida')
         .eq('id_entrada', idEntrada)
         .order('partida', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const filas = (data ?? []) as unknown as {
         id: string
@@ -484,7 +487,8 @@ export async function listarPartidasConAvance(idEntrada: string): Promise<Respue
         estado_partida: string
     }[]
     const ids = filas.map((f) => f.id)
-    const [{ data: resueltas }, { data: devoluciones }, { data: liberaciones }] = await Promise.all([
+    const [{ data: resueltas }, { data: devoluciones }, { data: liberaciones }, { data: reclasificaciones }] =
+        await Promise.all([
         ids.length
             ? supabase
                   .from('partidas_resueltas')
@@ -507,7 +511,42 @@ export async function listarPartidasConAvance(idEntrada: string): Promise<Respue
             .from('liberaciones_entrada')
             .select('id_partida_resuelta, cantidad')
             .eq('id_entrada', idEntrada),
+        /**
+         * ⭐ MEJORA 52 (07 Oct 2026) — **lo que SALIÓ de cada partida por RECLASIFICACIÓN.** Sin esto el
+         * desglose no cuadra: `RECIBIDAS 5 · DEV — · FINAL 4` dejaba **una pieza sin explicar** (no se
+         * fue con el proveedor: se fue a la partida de su capacidad). Cuenta `pendiente` **y** `ajustada`:
+         * el hecho ocurrió desde el guardado (lo `pendiente` es lo que espera a Recepción).
+         */
+        supabase
+            .from('reclasificaciones_entrada')
+            .select('id_partida_origen, id_partida_destino, cantidad, estado')
+            .eq('id_entrada', idEntrada),
     ])
+
+    /** Σ reclasificada que salió por partida — el tramo que faltaba para que el desglose cierre. */
+    const reclasificadoPorPartida = new Map<string, number>()
+    const reclasificadoEntraPorPartida = new Map<string, number>()
+    /** ⭐ Y las que **todavía esperan a Recepción** (`pendiente`): es lo que él tiene que ver. */
+    const reclasPendientePorPartida = new Map<string, number>()
+    for (const r of (reclasificaciones ?? []) as unknown as {
+        id_partida_origen: string
+        id_partida_destino: string
+        cantidad: number
+        estado: string
+    }[]) {
+        const c = Number(r.cantidad ?? 0)
+        reclasificadoPorPartida.set(r.id_partida_origen, (reclasificadoPorPartida.get(r.id_partida_origen) ?? 0) + c)
+        reclasificadoEntraPorPartida.set(
+            r.id_partida_destino,
+            (reclasificadoEntraPorPartida.get(r.id_partida_destino) ?? 0) + c
+        )
+        if (r.estado === 'pendiente') {
+            reclasPendientePorPartida.set(
+                r.id_partida_origen,
+                (reclasPendientePorPartida.get(r.id_partida_origen) ?? 0) + c
+            )
+        }
+    }
 
     // Σ liberada por GRUPO (`partidas_resueltas.id`) — la unidad de liberación.
     const liberadoPorGrupo = new Map<string, number>()
@@ -653,7 +692,26 @@ export async function listarPartidasConAvance(idEntrada: string): Promise<Respue
                 devs: devsSueltosPorPartida.get(f.id) ?? [],
                 liberadas: liberadoPorPartida.get(f.id) ?? 0,
                 revisadas,
-                restantes: Math.max(0, Number(f.cantidad_original) - revisadas),
+                /**
+                 * ⭐ MEJORA 52 (07 Oct 2026) — **LO QUE FALTA POR REVISAR se mide contra el FINAL.**
+                 *
+                 * Con `cantidad_original`, una partida a la que se le fue **1 pieza por reclasificación**
+                 * seguía diciendo «falta 1 por revisar» **para siempre** (caso real `ING-0002`: 5
+                 * declaradas, 4 revisadas, la 5ª en su propia partida) — el dueño lo cazó:
+                 * *«ya se revisaron los 5 porque uno pasó a una nueva partida pero sigue diciendo que
+                 * falta 1»*.
+                 *
+                 * ⚠️ Y el caso normal NO cambia: durante la revisión la DEV todavía no se aplica (se
+                 * aplica al emitir la nota), así que `vigente === original` salvo cuando hubo una
+                 * reclasificación — que es justo lo que esto arregla.
+                 */
+                restantes: Math.max(0, Number(f.cantidad_vigente) - revisadas),
+                /** ⭐ MEJORA 52 — el tramo que faltaba: lo que se fue a la partida de su capacidad. */
+                reclasificadas: reclasificadoPorPartida.get(f.id) ?? 0,
+                /** ⭐ Y lo que LLEGÓ (la partida nacida): así `0 + entran = final` también cierra. */
+                reclasificadas_entran: reclasificadoEntraPorPartida.get(f.id) ?? 0,
+                /** ⭐ Y cuántas **esperan a Recepción**: es lo que tiene que VER antes de la nota. */
+                reclasificadas_pendientes: reclasPendientePorPartida.get(f.id) ?? 0,
                 estado_partida: f.estado_partida as PartidaEntrada['estado_partida'],
             }
         }),
@@ -724,7 +782,7 @@ export async function marcarPartidaLlevaNs(
         .update({ lleva_ns: llevaNs })
         .eq('id', idPartida)
         .select('id')
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     // La RLS puede filtrar la fila en silencio: si no volvió ninguna, NO se escribió.
     const errFilas = sinEscritura(upd, 'cambiar la bandera de número de serie de la partida')
     if (errFilas) return { success: false, error: errFilas }
@@ -759,14 +817,15 @@ export async function consultarNumeroSerie(nsCrudo: string): Promise<RespuestaDa
     const { data, error } = await supabase
         .from('numeros_serie')
         .select(
-            'ns, resultado, id_partida_entrada, creado_por, created_at, entradas(folio, fecha, estado, proveedores(nombre_comercial)), usuarios(nombre_completo)'
+            'id, ns, resultado, id_partida_entrada, creado_por, created_at, entradas(folio, fecha, estado, proveedores(nombre_comercial)), usuarios(nombre_completo)'
         )
         .eq('ns', ns)
         .maybeSingle()
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     if (!data) return { success: true, data: { ns, encontrado: false } }
 
     const fila = data as unknown as {
+        id: string
         ns: string
         resultado: 'PASA' | 'NO_PASA'
         id_partida_entrada: string | null
@@ -813,6 +872,23 @@ export async function consultarNumeroSerie(nsCrudo: string): Promise<RespuestaDa
         }
     }
 
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **LA LECTURA de esta pieza.** El dueño lo pidió así: *«si queremos
+     * saber datos de un dato específico se escanea el NS y nos muestra los 40 datos de la lectura»*.
+     * El NS es la **llave**; `lecturas_disco` es **el archivo de la pieza** (append-only: si el disco se
+     * leyó dos veces, se trae **la última** y las anteriores quedan como historia).
+     * ⚠️ Se busca por `id_numero_serie` (la liga fuerte) y, si faltara, por el `ns` del firmware.
+     */
+    const { data: lectura } = await supabase
+        .from('lecturas_disco')
+        .select(
+            'ns, ns_windows, modelo, firmware, marca_detectada, marca_confianza, capacidad_gb, rpm, interfaz, es_nvme, horas_uso, encendidos, temperatura_c, salud_veredicto, salud_puntaje, apto, apto_para_decidir, requiere_revision, salud_motivos, sectores_reasignados, sectores_pendientes, sectores_no_corregibles, errores_crc, motor, leido_el, leido_por, lectura_cruda'
+        )
+        .or(`id_numero_serie.eq.${fila.id ?? 'null'},ns.eq.${fila.ns}`)
+        .order('leido_el', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
     return {
         success: true,
         data: {
@@ -828,6 +904,7 @@ export async function consultarNumeroSerie(nsCrudo: string): Promise<RespuestaDa
             capturado_por: fila.usuarios?.nombre_completo ?? null,
             capturado_at: fila.created_at,
             productos,
+            lectura: (lectura as unknown as LecturaNs | null) ?? null,
         },
     }
 }
@@ -844,7 +921,7 @@ export async function listarCategoriasCapturables(): Promise<RespuestaLista<Cate
         .select('id, nombre, id_categoria_padre, esquema_atributos, requiere_lector')
         .eq('es_activo', true)
         .order('nombre', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const filas = (data ?? []) as unknown as {
         id: string
@@ -901,7 +978,7 @@ export async function listarCategoriasParaEntrada(): Promise<RespuestaLista<Cate
         .select('id, nombre, id_categoria_padre, esquema_atributos, requiere_lector, requiere_revision_pieza')
         .eq('es_activo', true)
         .order('nombre', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const filas = (data ?? []) as unknown as {
         id: string
@@ -955,6 +1032,19 @@ export async function crearProductoRapido(input: {
     id_marca: string | null
     nombre: string
     atributos: Record<string, unknown>
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **`maneja_numero_serie` ya NO nace `false` fijo.**
+     *
+     * Antes esta función lo escribía `false` a mano ⇒ un **DISCO** creado desde el cotejo nacía
+     * diciendo que **no maneja serie**, y eso no es cosmético: el flag lo leen **Ventas**
+     * (`ventas.ts`) y la **salida de inventario** (`RegistrarSalidaDialog`) ⇒ el disco **salía sin
+     * pedir su NS**. Medido: el único producto vivo (un HDD) tenía `false`.
+     *
+     * El valor real lo declara la **puerta**: `partidas_entrada.lleva_ns` (la mercancía de este ERP
+     * trae serial casi siempre, y el flujo NUEVO lo apaga). Cuando el llamador no lo sabe, el
+     * respaldo es **`true`** — asumir que no lleva serie es lo que rompía.
+     */
+    maneja_numero_serie?: boolean
 }): Promise<RespuestaDato<{ id: string; sku: string; existente: boolean }>> {
     const supabase = await createClient()
     const sesion = await sesionActiva(supabase)
@@ -992,7 +1082,7 @@ export async function crearProductoRapido(input: {
         supabase.from('impuestos').select('id').limit(1).maybeSingle(),
         supabase.rpc('generar_folio', { p_tipo: 'producto' }),
     ])
-    if (errFolio) return { success: false, error: errFolio.message }
+    if (errFolio) return { success: false, error: describirError(errFolio) }
     if (!unidad || !impuesto) return { success: false, error: 'Faltan catálogos de unidad o impuesto.' }
 
     const { data, error } = await supabase
@@ -1010,7 +1100,8 @@ export async function crearProductoRapido(input: {
             stock_actual: 0,
             stock_minimo: 0,
             requiere_revision: true,
-            maneja_numero_serie: false,
+            // ⭐ MEJORA 52 — el dato de la PUERTA (`lleva_ns`); si el llamador no lo sabe, `true`.
+            maneja_numero_serie: input.maneja_numero_serie ?? true,
             pendiente_enriquecimiento: true,
             creado_por: sesion.userId,
         })
@@ -1036,7 +1127,7 @@ export async function crearProductoRapido(input: {
                 return { success: true, data: { id: fila.id, sku: fila.sku, existente: true } }
             }
         }
-        return { success: false, error: error.message }
+        return { success: false, error: describirError(error) }
     }
     return { success: true, data: { id: data.id, sku: data.sku, existente: false } }
 }
@@ -1145,6 +1236,73 @@ export async function listarResultadoRevision(idEntrada: string): Promise<Respue
 
 /** ⭐ Guardar AVANCE de revisión de una partida (usuario 20 Sep: no es "lote"):
  *  agrupa PASA por huella · NO_PASA por motivo · cierra partidas y entrada. */
+/**
+ * ⭐ MEJORA 52 (07 Oct 2026) — **LA PARTIDA DE LA CAPACIDAD MEDIDA** (la reclasificación).
+ *
+ * El caso, del dueño: *«pueden decir que son de 1TB pero vienen 2 de 500GB, **por eso se revisa**»*.
+ * La pieza **entra** — no se rechaza: se va a la partida de **su** capacidad, y **cada partida resuelve
+ * su SKU** (su ejemplo: *«quedarán 4 HDD 2TB y 1 HDD 3TB»*).
+ *
+ * ① **Si ya hay una partida de esa capacidad en la entrada, se usa ESA** — aunque sea declarada (es la
+ *    regla que él pidió: *«validar si las otras partidas tienen de esa capacidad»*).
+ * ② **Si no existe, NACE**: hereda `costo_acordado` y `lleva_ns` de la de origen (**decisión D3**),
+ *    y nace con **`cantidad_original = 0`** (**decisión b**: *no venía en la nota del proveedor*) y
+ *    `origen = 'reclasificacion'`, que es lo que la hace **visible como nacida** y lo que **relaja los
+ *    CHECK** de cantidad solo para ella (`g18_m53b`).
+ * ⚠️ Su **`cantidad_vigente` la mueve RECEPCIÓN al validar** (la pieza llega a 0 y sube a 1): entre el
+ * guardado y la validación la propuesta está **`pendiente`** y **la nota no se puede emitir**.
+ */
+async function asegurarPartidaDeCapacidad(
+    supabase: Awaited<ReturnType<typeof createClient>>,
+    opts: { idEntrada: string; idPartidaOrigen: string; capacidadMedida: string; creadoPor: string }
+): Promise<{ id: string; nueva: boolean } | { error: string }> {
+    const { data: origen } = await supabase
+        .from('partidas_entrada')
+        .select('id, id_entrada, id_categoria, atributos, costo_acordado, lleva_ns')
+        .eq('id', opts.idPartidaOrigen)
+        .single()
+    if (!origen) return { error: 'La partida de origen de la reclasificación no existe.' }
+
+    const { data: hermanas } = await supabase
+        .from('partidas_entrada')
+        .select('id, partida, atributos')
+        .eq('id_entrada', origen.id_entrada)
+        .eq('id_categoria', origen.id_categoria)
+
+    /** ① ¿ya hay una partida de ESA capacidad? (declarada o nacida, da igual: la pieza va con las suyas). */
+    const ya = (hermanas ?? []).find(
+        (p) => String((p.atributos as Record<string, unknown> | null)?.capacidad ?? '') === opts.capacidadMedida
+    )
+    if (ya) return { id: ya.id as string, nueva: false }
+
+    /** ② Nace. El número es el siguiente de la entrada; el resto se hereda (D3) o nace en cero (b). */
+    const siguiente = Math.max(0, ...(hermanas ?? []).map((p) => Number(p.partida ?? 0))) + 1
+    const { data: nueva, error } = await supabase
+        .from('partidas_entrada')
+        .insert({
+            id_entrada: origen.id_entrada,
+            partida: siguiente,
+            id_categoria: origen.id_categoria,
+            atributos: {
+                ...((origen.atributos as Record<string, unknown> | null) ?? {}),
+                capacidad: opts.capacidadMedida,
+            },
+            cantidad_original: 0,
+            cantidad_vigente: 0,
+            costo_acordado: origen.costo_acordado,
+            lleva_ns: origen.lleva_ns,
+            estado_partida: 'PENDIENTE',
+            origen: 'reclasificacion',
+            creado_por: opts.creadoPor,
+        })
+        .select('id')
+        .single()
+    if (error || !nueva) {
+        return { error: describirError(error) ?? 'No se pudo crear la partida de la capacidad medida.' }
+    }
+    return { id: nueva.id as string, nueva: true }
+}
+
 export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise<RespuestaAccion> {
     const supabase = await createClient()
     const sesion = await sesionActiva(supabase)
@@ -1156,6 +1314,129 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
         return { success: false, error: 'La entrada ya avanzó: no se puede revisar.' }
     }
     if (input.piezas.length === 0) return { success: false, error: 'El lote está vacío.' }
+
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **LA RECLASIFICACIÓN, en el acto de guardar.**
+     *
+     * Las piezas que el técnico marcó («**Crear partida**» — su decisión, tomada **al leer**, cuando vio
+     * el aviso rojo) **no son de la partida que revisó**: cada una se va a la partida de **SU** capacidad
+     * (la que ya exista en la entrada, o una que **nace** heredando costo y `lleva_ns`).
+     *
+     * ⚠️ **El re-apunte va ACÁ, antes del tope y del agrupado**, y no en la UI: así su **huella**, su
+     * **NS** y su **evidencia** cuelgan del DESTINO, que es donde la pieza de verdad está — y el wizard
+     * sigue sin escribir nada (la regla del panel: *«esto NO escribe en la base»*).
+     *
+     * ⚠️ Y **no se pierde la decisión**: cada re-apunte deja una fila **`pendiente`** en
+     * `reclasificaciones_entrada`, que **RECEPCIÓN valida al cerrar la revisión** (decisión D4). Hasta
+     * entonces la nota **no se puede emitir**.
+     */
+    type Reclasificada = { idPartidaOrigen: string; idPartidaDestino: string; pieza: PiezaRevision }
+    const reclasificadas: Reclasificada[] = []
+    const destinos = new Map<string, string>()
+    for (const p of input.piezas) {
+        if (p.reclasificar !== true || !p.desvio) continue
+        const origen = p.id_partida_entrada
+        const llave = `${origen}|${p.desvio.medida}`
+        let idDestino = destinos.get(llave)
+        if (!idDestino) {
+            const r = await asegurarPartidaDeCapacidad(supabase, {
+                idEntrada: input.id_entrada,
+                idPartidaOrigen: origen,
+                capacidadMedida: p.desvio.medida,
+                creadoPor: sesion.userId,
+            })
+            if ('error' in r) return { success: false, error: r.error }
+            idDestino = r.id
+            destinos.set(llave, idDestino)
+        }
+        reclasificadas.push({ idPartidaOrigen: origen, idPartidaDestino: idDestino, pieza: p })
+        p.id_partida_entrada = idDestino
+    }
+    /**
+     * ⭐ **D5 — el NS de una pieza reclasificada apunta a la partida NUEVA.** No se adivina: la pieza
+     * **trae su NS** (el de la lectura del panel), así que se sabe sin depender del orden del concentrado.
+     */
+    const nsReclasificados = new Map<string, string>()
+    for (const r of reclasificadas) {
+        if (r.pieza.ns) nsReclasificados.set(r.pieza.ns, r.idPartidaDestino)
+    }
+    /**
+     * ⭐ FIX 08 Oct 2026 — **LA PROPUESTA SE REGISTRA *ANTES* DE MOVER EL VIGENTE.**
+     *
+     * El **orden es el FIX**, no un detalle de estilo: el candado de la BD
+     * (`fn_partidas_vigente_guard` · migración `g18_m53c`) solo permite que una partida **crezca por
+     * encima de lo declarado** si las piezas que llegaron **están declaradas** en
+     * `reclasificaciones_entrada`. Moviendo el vigente primero, el candado no las ve y **rechaza el
+     * guardado entero** (`23514`) — que es exactamente el defecto medido el 08 Oct 2026: la
+     * reclasificación cuyo destino era una partida **declarada** (la entrada ya tenía una partida de
+     * esa capacidad) **no se podía guardar** y el turno del técnico se caía.
+     *
+     * Es el mismo esqueleto que la DEV: la fila guarda **la constancia del desvío**
+     * (`capacidad_declarada` vs `capacidad_medida`), la pieza (`atributos` · marca · NS) y las dos
+     * partidas, en `pendiente` hasta que **Recepción la valida** (D4) — y **mientras haya una
+     * pendiente la nota no se puede emitir**.
+     *
+     * ⚠️ **Sin transacción en PostgREST:** si algo falla después, la propuesta queda `pendiente` sin
+     * mover el vigente. No se esconde: `ajustarYGenerarNota` recalcula con la **fórmula absoluta**,
+     * así que el estado converge al validarla.
+     */
+    if (reclasificadas.length > 0) {
+        const { error: errRec } = await supabase.from('reclasificaciones_entrada').insert(
+            reclasificadas.map((r) => ({
+                id_entrada: input.id_entrada,
+                id_partida_origen: r.idPartidaOrigen,
+                id_partida_destino: r.idPartidaDestino,
+                cantidad: 1,
+                ns: r.pieza.ns ?? null,
+                id_marca: r.pieza.id_marca,
+                atributos: r.pieza.atributos,
+                capacidad_declarada: r.pieza.desvio?.declarada ?? '',
+                capacidad_medida: r.pieza.desvio?.medida ?? '',
+                estado: 'pendiente',
+                creado_por: sesion.userId,
+            }))
+        )
+        if (errRec) return { success: false, error: describirError(errRec) }
+    }
+    /**
+     * ⭐ MEJORA 52 — **el «final» de las dos partidas se mueve ACÁ, no al emitir la nota.**
+     *
+     * ⚠️ El porqué, medido: la pieza **ya salió** del origen (el técnico lo decidió y se registró en su
+     * partida) ⇒ si el origen siguiera diciendo 5 con 4 aprobadas, la Revisión mostraría **4 de 5** y
+     * **la entrada nunca cerraría** (y la nota se emite solo al cerrar). Además el ajuste de la nota
+     * recalcula el vigente con la **misma fórmula absoluta** (`original − DEV + llegan − salen`), así que
+     * **re-afirma el mismo número**: no hay doble movimiento.
+     *
+     * ⚠️ La **validación de Recepción** sigue siendo la que manda: la propuesta queda `pendiente`, y
+     * **sin validarla no se emite la nota** (decisión D4). Si Recepción la rechazara, se revierte.
+     */
+    if (reclasificadas.length > 0) {
+        const salenPorPartida = new Map<string, number>()
+        const lleganPorPartida = new Map<string, number>()
+        for (const r of reclasificadas) {
+            salenPorPartida.set(r.idPartidaOrigen, (salenPorPartida.get(r.idPartidaOrigen) ?? 0) + 1)
+            lleganPorPartida.set(r.idPartidaDestino, (lleganPorPartida.get(r.idPartidaDestino) ?? 0) + 1)
+        }
+        const idsTocadas = new Set([...salenPorPartida.keys(), ...lleganPorPartida.keys()])
+        const { data: vigentesActuales } = await supabase
+            .from('partidas_entrada')
+            .select('id, cantidad_vigente')
+            .in('id', [...idsTocadas])
+        for (const p of vigentesActuales ?? []) {
+            const nueva =
+                Math.max(0, Number(p.cantidad_vigente ?? 0)) +
+                (lleganPorPartida.get(p.id as string) ?? 0) -
+                (salenPorPartida.get(p.id as string) ?? 0)
+            const { data: updVig, error: errVig } = await supabase
+                .from('partidas_entrada')
+                .update({ cantidad_vigente: Math.max(0, nueva) })
+                .eq('id', p.id)
+                .select('id')
+            if (errVig) return { success: false, error: describirError(errVig) }
+            const errFilasVig = sinEscritura(updVig, 'mover la cantidad vigente por la reclasificación')
+            if (errFilasVig) return { success: false, error: errFilasVig }
+        }
+    }
 
     /**
      * ⭐ MEJORA 44 (30 Sep 2026) — **LA SALUD SIN AVAL NO MANDA UNA DEVOLUCIÓN.**
@@ -1263,7 +1544,7 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
         const [{ data: partida }, { data: resueltas }, { data: devs }] = await Promise.all([
             supabase
                 .from('partidas_entrada')
-                .select('cantidad_original, partida, lleva_ns')
+                .select('cantidad_original, cantidad_vigente, partida, lleva_ns, origen')
                 .eq('id', idPartida)
                 .single(),
             supabase.from('partidas_resueltas').select('cantidad_aprobada').eq('id_partida_entrada', idPartida),
@@ -1271,10 +1552,23 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
         ])
         if (!partida) continue
         if (partida.lleva_ns) partidasConNs.add(idPartida)
+        /**
+         * ⭐ MEJORA 52 — **una partida NACIDA por reclasificación no tiene tope.** No hay nada declarado
+         * que respetar (`cantidad_original = 0`): sus piezas **no vienen de la nota del proveedor**, llegan
+         * por la decisión del técnico (y la valida Recepción). El tope sigue intacto para las declaradas,
+         * que es lo que protege de revisar 60 piezas de 50.
+         */
+        if (partida.origen === 'reclasificacion') continue
         const yaOk = (resueltas ?? []).reduce((s, r) => s + Number(r.cantidad_aprobada ?? 0), 0)
         const yaMal = (devs ?? []).reduce((s, d) => s + Number(d.cantidad ?? 0), 0)
-        const original = Number(partida.cantidad_original)
-        const restantes = Math.max(0, original - yaOk - yaMal)
+        /**
+         * ⭐ MEJORA 52 — el tope también va contra el **FINAL** de la partida, no contra lo declarado:
+         * de lo contrario una partida a la que se le fue una pieza por reclasificación **aceptaría una
+         * más** (5 declaradas, 4 en casa… y `original − revisadas` = 1). ⚠️ La UI manda el mismo número
+         * (`restantes`), pero **el servidor protege el dato**: los dos tienen que coincidir.
+         */
+        const vigente = Number(partida.cantidad_vigente)
+        const restantes = Math.max(0, vigente - yaOk - yaMal)
         if (delta.ok + delta.mal > restantes) {
             return {
                 success: false,
@@ -1321,7 +1615,7 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
                 .update({ cantidad_aprobada: Number(existente.cantidad_aprobada) + g.count })
                 .eq('id', existente.id)
                 .select('id')
-            if (errUpd) return { success: false, error: errUpd.message }
+            if (errUpd) return { success: false, error: describirError(errUpd) }
             const errFilas = sinEscritura(upd, 'sumar el avance del grupo aprobado')
             if (errFilas) return { success: false, error: errFilas }
         } else {
@@ -1333,9 +1627,16 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
                 creado_por: sesion.userId,
                 // id_producto NULL — lo resuelve ALMACÉN por huella.
             })
-            if (errIns) return { success: false, error: errIns.message }
+            if (errIns) return { success: false, error: describirError(errIns) }
         }
     }
+
+    /**
+     * ⚠️ **La propuesta de reclasificación YA se registró arriba** — ver «LA PROPUESTA SE REGISTRA
+     * *ANTES* DE MOVER EL VIGENTE». Se movió a propósito: el candado de la BD (`g18_m53c`) exige que
+     * las piezas que llegaron existan como filas **antes** de que el vigente crezca. No volver a
+     * insertarla acá.
+     */
 
     /**
      * ⭐ MEJORA 35 (27 Sep 2026) — **el CONCENTRADO de la tanda**: los NS que el técnico escaneó en las
@@ -1374,7 +1675,13 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
         }
         // La partida se atribuye SOLO cuando la tanda entera es de una. Si el técnico revisó piezas de
         // dos partidas, el NS queda colgando de la ENTRADA (NULL) antes que inventar a cuál pertenece (L6).
-        const partidasTanda = new Set(input.piezas.map((p) => p.id_partida_entrada))
+        // ⭐ MEJORA 52 — pero si la tanda se partió por una **reclasificación**, las piezas que SÍ son de
+        // esta partida siguen siendo de una sola: se calcula sobre las que se quedan, y los NS de las
+        // reclasificadas van a SU partida (D5, abajo) porque la pieza trae su NS.
+        const piezasQueSeQuedan = input.piezas.filter(
+            (p) => !reclasificadas.some((r) => r.pieza === p)
+        )
+        const partidasTanda = new Set(piezasQueSeQuedan.map((p) => p.id_partida_entrada))
         const idPartidaTanda = partidasTanda.size === 1 ? [...partidasTanda][0] : null
         const filasNs = [
             ...input.ns.pasa.map((ns) => ({ ns: ns.trim(), resultado: 'PASA' })),
@@ -1382,7 +1689,7 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
         ].map((f) => ({
             ns: f.ns,
             id_entrada: input.id_entrada,
-            id_partida_entrada: idPartidaTanda,
+            id_partida_entrada: nsReclasificados.get(f.ns) ?? idPartidaTanda,
             resultado: f.resultado,
             creado_por: sesion.userId,
         }))
@@ -1392,7 +1699,7 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
                 .from('numeros_serie')
                 .insert(filasNs)
                 .select('id, ns')
-            if (errNs) return { success: false, error: errNs.message }
+            if (errNs) return { success: false, error: describirError(errNs) }
             for (const r of nsCreados ?? []) idsNs.set(r.ns, r.id)
         }
 
@@ -1439,13 +1746,19 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
                     errores_crc: l.errores_crc ?? null,
                     motor: l.motor ?? 'desconocido',
                     smart_raw: (l.smart_raw ?? null) as never,
+                    // ⭐ MEJORA 52 (07 Oct 2026) — las 2 columnas que YA existían y quedaban NULL
+                    // (el agente ya mandaba la marca sugerida y su confianza: se tiraban) + la
+                    // evidencia completa del agente (`g18_m52_lectura_cruda_agente`).
+                    marca_detectada: l.marca_detectada ?? null,
+                    marca_confianza: l.marca_confianza ?? null,
+                    lectura_cruda: (l.lectura_cruda ?? null) as never,
                     origen: 'revision',
                     leido_por: sesion.userId,
                     creado_por: sesion.userId,
                 }))
             if (filasLecturas.length) {
                 const { error: errLecturas } = await supabase.from('lecturas_disco').insert(filasLecturas)
-                if (errLecturas) return { success: false, error: errLecturas.message }
+                if (errLecturas) return { success: false, error: describirError(errLecturas) }
             }
         }
     } else {
@@ -1468,7 +1781,7 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
                     id_entrada: input.id_entrada,
                     creado_por: sesion.userId,
                 })
-                if (errNs) return { success: false, error: errNs.message }
+                if (errNs) return { success: false, error: describirError(errNs) }
             }
         }
     }
@@ -1526,7 +1839,7 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
                 .update({ cantidad: Number(existente.cantidad) + g.count })
                 .eq('id', existente.id)
                 .select('id')
-            if (errUpd) return { success: false, error: errUpd.message }
+            if (errUpd) return { success: false, error: describirError(errUpd) }
             const errFilas = sinEscritura(upd, 'sumar la DEV del mismo motivo')
             if (errFilas) return { success: false, error: errFilas }
         } else {
@@ -1542,14 +1855,30 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
                 atributos: g.atributos,
                 creado_por: sesion.userId,
             })
-            if (errIns) return { success: false, error: errIns.message }
+            if (errIns) return { success: false, error: describirError(errIns) }
         }
     }
 
-    // Cierre de partida (aprobadas + devueltas >= original → OK | MAL).
+    /**
+     * Cierre de partida (`aprobadas + devueltas >= FINAL` → `OK | MAL`).
+     *
+     * ⭐ FIX 08 Oct 2026 — **el cierre se mide contra `cantidad_vigente`, no contra
+     * `cantidad_original`.** Es el tramo que faltaba de la MEJORA 52: el **tope de servidor** y el
+     * **`restantes`** de la vista (`listarPartidasConAvance`) ya se medían contra el final, pero el
+     * cierre se quedó en lo declarado ⇒ una partida a la que la **reclasificación** le quitó una
+     * pieza **nunca** alcanzaba su `cantidad_original` y quedaba `PENDIENTE` **para siempre**.
+     * `fn_cerrar_revision` exige **0 partidas `PENDIENTE`**, así que la entrada **nunca cerraba la
+     * revisión** y la nota era **inalcanzable** (medido el 08 Oct 2026 en `ING-0008`: 5 declaradas,
+     * 4 revisadas + 1 en su partida nueva ⇒ la entrada se quedaba en `en_revision` con `restantes = 0`).
+     *
+     * ⚠️ **El caso normal NO cambia:** durante la revisión la DEV todavía no se aplica
+     * (`ajustarYGenerarNota` la aplica al emitir la nota), así que `vigente === original` salvo que
+     * haya habido una reclasificación — que es justo lo que esto arregla. La partida **nacida**
+     * (`original = 0`, `vigente = lo que llegó`) cierra igual que antes.
+     */
     const partidasAfectadas = new Set(input.piezas.map((p) => p.id_partida_entrada))
     for (const idPartida of partidasAfectadas) {
-        const { data: partida } = await supabase.from('partidas_entrada').select('cantidad_original').eq('id', idPartida).single()
+        const { data: partida } = await supabase.from('partidas_entrada').select('cantidad_vigente').eq('id', idPartida).single()
         if (!partida) continue
         const [{ data: resueltas }, { data: devs }] = await Promise.all([
             supabase.from('partidas_resueltas').select('cantidad_aprobada').eq('id_partida_entrada', idPartida),
@@ -1557,13 +1886,13 @@ export async function guardarAvanceRevision(input: AvanceRevisionInput): Promise
         ])
         const totalOk = (resueltas ?? []).reduce((s, r) => s + Number(r.cantidad_aprobada), 0)
         const totalMal = (devs ?? []).reduce((s, d) => s + Number(d.cantidad), 0)
-        if (totalOk + totalMal >= Number(partida.cantidad_original)) {
+        if (totalOk + totalMal >= Number(partida.cantidad_vigente)) {
             const { data: upd, error: errPart } = await supabase
                 .from('partidas_entrada')
                 .update({ estado_partida: totalMal > 0 ? 'MAL' : 'OK' })
                 .eq('id', idPartida)
                 .select('id')
-            if (errPart) return { success: false, error: errPart.message }
+            if (errPart) return { success: false, error: describirError(errPart) }
             const errFilas = sinEscritura(upd, 'cerrar la partida (OK/MAL)')
             if (errFilas) return { success: false, error: errFilas }
         }
@@ -1620,7 +1949,7 @@ export async function liberarAvance(
         p_items: input.items,
         p_notas: input.notas ?? null,
     })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: { tanda: Number(data) } }
 }
 
@@ -1727,7 +2056,7 @@ export async function listarTandas(estados?: EstadoTanda[]): Promise<RespuestaLi
     if (estados && estados.length > 0) q = q.in('estado', estados)
 
     const { data, error } = await q
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const tandas = aTandas((data ?? []) as unknown as FilaLiberacionCruda[])
     return { success: true, data: tandas, total: tandas.length }
@@ -1884,7 +2213,7 @@ async function avanzarIngreso(
         .eq('id_entrada', idEntrada)
         .eq('estado', desde)
         .select('id')
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     if (!upd || upd.length === 0) {
         return {
             success: false,
@@ -1943,7 +2272,7 @@ async function avanzarBandeja(
         .in('id_tanda', idsTanda)
         .eq('id_partida_resuelta', idPartidaResuelta)
         .select('id')
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const errFilas = sinEscritura(upd, 'avanzar la bandeja')
     if (errFilas) return { success: false, error: errFilas }
     return { success: true }
@@ -1961,10 +2290,10 @@ export async function abrirCotejoBandeja(
     const { data, error } = await supabase
         .from('liberaciones_entrada')
         .select(
-            'id, cantidad, estado, partidas_resueltas(id, id_marca, marcas_producto(nombre), atributos, id_producto, productos(sku, nombre), partidas_entrada(id_categoria, costo_acordado))'
+            'id, cantidad, estado, partidas_resueltas(id, id_marca, marcas_producto(nombre), atributos, id_producto, productos(sku, nombre), partidas_entrada(id_categoria, costo_acordado, lleva_ns))'
         )
         .in('id_tanda', idsTanda)
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const porGrupo = new Map<string, CotejoLinea>()
     for (const f of (data ?? []) as unknown as {
@@ -1977,7 +2306,7 @@ export async function abrirCotejoBandeja(
             atributos: Record<string, unknown> | null
             id_producto: string | null
             productos: { sku: string | null; nombre: string | null } | null
-            partidas_entrada: { id_categoria: string | null; costo_acordado: number | null } | null
+            partidas_entrada: { id_categoria: string | null; costo_acordado: number | null; lleva_ns: boolean | null } | null
         } | null
     }[]) {
         const g = f.partidas_resueltas
@@ -2001,6 +2330,8 @@ export async function abrirCotejoBandeja(
             cantidad_aprobada: Number(f.cantidad ?? 0),
             cantidad_pendiente: Number(f.cantidad ?? 0),
             costo_acordado: Number(g.partidas_entrada?.costo_acordado ?? 0),
+            // ⭐ MEJORA 52 — lo que declaró la puerta: el SKU que nazca de la bandeja lo hereda.
+            lleva_ns: g.partidas_entrada?.lleva_ns ?? false,
         })
     }
 
@@ -2059,7 +2390,7 @@ export async function confirmarAltaBandeja(input: {
                 .update({ id_producto: l.id_producto })
                 .eq('id', l.id_partida_resuelta)
                 .select('id')
-            if (errSku) return { success: false, error: errSku.message }
+            if (errSku) return { success: false, error: describirError(errSku) }
             const errFilas = sinEscritura(upd, 'persistir el SKU resuelto')
             if (errFilas) return { success: false, error: errFilas }
         }
@@ -2094,7 +2425,7 @@ export async function confirmarAltaBandeja(input: {
                 .eq('id', f.id)
                 .eq('estado', 'en_almacen') // ← reanudable: no re-confirma lo ya confirmado
                 .select('id')
-            if (errTanda) return { success: false, error: errTanda.message }
+            if (errTanda) return { success: false, error: describirError(errTanda) }
             const errFilasTanda = sinEscritura(updTanda, 'confirmar la tanda de la bandeja')
             if (errFilasTanda) return { success: false, error: errFilasTanda }
             restante -= toma
@@ -2191,7 +2522,7 @@ export async function ajustarYGenerarNota(
             .update({ estado: 'ajustada', ajustado_por: sesion.userId, fecha_ajuste: new Date().toISOString() })
             .eq('id', d.id)
             .select('id')
-        if (errDev) return { success: false, error: errDev.message }
+        if (errDev) return { success: false, error: describirError(errDev) }
         const errFilas = sinEscritura(upd, 'ajustar la devolución')
         if (errFilas) return { success: false, error: errFilas }
     }
@@ -2199,6 +2530,47 @@ export async function ajustarYGenerarNota(
     for (const d of (devoluciones ?? [])) {
         devPorPartida.set(d.id_partida_entrada, (devPorPartida.get(d.id_partida_entrada) ?? 0) + Number(d.cantidad))
     }
+
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **LA RECLASIFICACIÓN se valida EN ESTE ACTO, igual que la DEV.**
+     *
+     * Decisión del dueño: *«RECEPCIÓN valida el cambio»* y *«igual que una DEV: **no se puede hacer la
+     * nota sin validar ese ajuste**»*. ⇒ Las propuestas que dejó la Revisión (`pendiente`) se **validan
+     * acá** (`ajustada` + `ajustado_por` + `fecha_ajuste`) y **en este mismo momento** se mueve
+     * `cantidad_vigente`: **baja en el origen y sube en el destino**.
+     *
+     * ⚠️ Es el movimiento que hace verdad su frase *«la nota original no miente: solo dejó de ser la
+     * verdad»*: **`cantidad_original` NO se toca** (la partida declarada sigue diciendo lo que el
+     * proveedor declaró) y la nacida lleva `cantidad_original = 0` ⇒ **la suma de los originales sigue
+     * siendo lo declarado** y los **vigentes** dicen lo que de verdad entró (4 + 1).
+     */
+    const { data: reclas } = await supabase
+        .from('reclasificaciones_entrada')
+        .select('id, id_partida_origen, id_partida_destino, cantidad')
+        .eq('id_entrada', idEntrada)
+        .eq('estado', 'pendiente')
+    for (const r of reclas ?? []) {
+        const { data: upd, error: errRec } = await supabase
+            .from('reclasificaciones_entrada')
+            .update({
+                estado: 'ajustada',
+                ajustado_por: sesion.userId,
+                fecha_ajuste: new Date().toISOString(),
+            })
+            .eq('id', r.id)
+            .select('id')
+        if (errRec) return { success: false, error: describirError(errRec) }
+        const errFilasRec = sinEscritura(upd, 'validar la reclasificación')
+        if (errFilasRec) return { success: false, error: errFilasRec }
+    }
+    const recSalen = new Map<string, number>()
+    const recLlegan = new Map<string, number>()
+    for (const r of reclas ?? []) {
+        const c = Number(r.cantidad)
+        recSalen.set(r.id_partida_origen, (recSalen.get(r.id_partida_origen) ?? 0) + c)
+        recLlegan.set(r.id_partida_destino, (recLlegan.get(r.id_partida_destino) ?? 0) + c)
+    }
+
     const filas = (partidas ?? []) as unknown as Array<{
         id: string
         categorias_producto: { nombre: string | null; esquema_atributos: AtributoEsquema[] | null } | null
@@ -2210,9 +2582,23 @@ export async function ajustarYGenerarNota(
     // ── (1) La CANTIDAD VIGENTE sigue siendo de la PARTIDA declarada ────────────
     // `cantidad_original` es inmutable (R7) y el ajuste solo deriva la vigente. Esto NO cambia con
     // la decisión 22.h: la partida declarada sigue siendo la unidad del contrato con el proveedor.
+    /**
+     * ⭐ MEJORA 52 — **una sola fórmula para el «final» de la partida**, usada por el ajuste y por las
+     * líneas de la nota: `original − DEV + lo que llega por reclasificación − lo que se va`.
+     * La nacida arranca en `original = 0` y **sube** con lo que recibe (por eso `g18_m53b` relajó sus
+     * CHECK); la declarada **baja** cuando una pieza suya resulta ser de otra capacidad.
+     */
+    const vigenteDe = (idPartida: string, original: number) =>
+        Math.max(
+            0,
+            original -
+                (devPorPartida.get(idPartida) ?? 0) +
+                (recLlegan.get(idPartida) ?? 0) -
+                (recSalen.get(idPartida) ?? 0)
+        )
     const vigentes = filas.map((p) => ({
         id_partida: p.id,
-        cantidad: Math.max(0, Number(p.cantidad_original) - (devPorPartida.get(p.id) ?? 0)),
+        cantidad: vigenteDe(p.id, Number(p.cantidad_original)),
     }))
     for (const v of vigentes) {
         const { data: upd, error: errVig } = await supabase
@@ -2220,7 +2606,7 @@ export async function ajustarYGenerarNota(
             .update({ cantidad_vigente: v.cantidad })
             .eq('id', v.id_partida)
             .select('id')
-        if (errVig) return { success: false, error: errVig.message }
+        if (errVig) return { success: false, error: describirError(errVig) }
         const errFilas = sinEscritura(upd, 'fijar la cantidad vigente de la partida')
         if (errFilas) return { success: false, error: errFilas }
     }
@@ -2248,7 +2634,7 @@ export async function ajustarYGenerarNota(
     }
 
     const lineas = filas.flatMap((p) => {
-        const vigente = Math.max(0, Number(p.cantidad_original) - (devPorPartida.get(p.id) ?? 0))
+        const vigente = vigenteDe(p.id, Number(p.cantidad_original))
         const hs = huellasPorPartida.get(p.id) ?? []
         const sumaHuellas = hs.reduce((s, h) => s + h.cantidad, 0)
         // Al CERRAR la revisión Σ aprobadas = vigente (una pieza está aprobada o devuelta, nunca en
@@ -2280,7 +2666,7 @@ export async function ajustarYGenerarNota(
 
     // Generar la nota de compra (folio NC · partidas por línea soft valorizada a costo).
     const { data: folio, error: errFolio } = await supabase.rpc('generar_folio', { p_tipo: 'nota_compra' })
-    if (errFolio || !folio) return { success: false, error: errFolio?.message ?? 'No se pudo generar el folio.' }
+    if (errFolio || !folio) return { success: false, error: describirError(errFolio) ?? 'No se pudo generar el folio.' }
     const idPendiente = await idEstadoPagoPendiente(supabase)
     if (!idPendiente) return { success: false, error: 'El catálogo de estados de pago no está disponible.' }
 
@@ -2304,7 +2690,7 @@ export async function ajustarYGenerarNota(
         })
         .select('id, folio')
         .single()
-    if (errNota) return { success: false, error: errNota.message }
+    if (errNota) return { success: false, error: describirError(errNota) }
 
     for (let i = 0; i < lineas.length; i++) {
         const l = lineas[i]
@@ -2317,7 +2703,7 @@ export async function ajustarYGenerarNota(
             subtotal_partida: new Decimal(l.costo_acordado).times(l.cantidad).toNumber(),
             orden: i + 1,
         })
-        if (errP) return { success: false, error: errP.message }
+        if (errP) return { success: false, error: describirError(errP) }
     }
 
     // Ligar la nota a la entrada + marcar ajustada.
@@ -2326,7 +2712,7 @@ export async function ajustarYGenerarNota(
         .update({ id_nota: nota.id, estado: 'ajustada' })
         .eq('id', idEntrada)
         .select('id')
-    if (errEntrada) return { success: false, error: errEntrada.message }
+    if (errEntrada) return { success: false, error: describirError(errEntrada) }
     const errLiga = sinEscritura(updEntrada, 'ligar la nota a la entrada')
     if (errLiga) return { success: false, error: errLiga }
 
@@ -2370,7 +2756,7 @@ export async function ajustarYGenerarNota(
     const cerrada = todoPorTandas && cotejo.success && saldoPorIngresar === 0 && todoIngresado
     if (cerrada) {
         const { error: errCierre } = await supabase.rpc('fn_confirmar_alta', { p_id_entrada: idEntrada })
-        if (errCierre) return { success: false, error: errCierre.message }
+        if (errCierre) return { success: false, error: describirError(errCierre) }
     }
 
     return { success: true, data: { id: nota.id, folio: nota.folio, cerrada } }
@@ -2394,7 +2780,7 @@ export async function tomarAcondicionamiento(idEntrada: string): Promise<Respues
         actor_id: sesion.userId,
         creado_por: sesion.userId,
     })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true }
 }
 
@@ -2415,7 +2801,7 @@ export async function completarAcondicionamiento(idEntrada: string): Promise<Res
         actor_id: sesion.userId,
         creado_por: sesion.userId,
     })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true }
 }
 
@@ -2457,7 +2843,7 @@ async function escribirAlta(
         })
         .select('id')
         .single()
-    if (errLote) return errLote.message
+    if (errLote) return describirErrorTexto(errLote)
 
     const { data: producto } = await supabase
         .from('productos')
@@ -2477,7 +2863,7 @@ async function escribirAlta(
         origen_id: lote.id,
         creado_por: userId,
     })
-    if (errMov) return errMov.message
+    if (errMov) return describirErrorTexto(errMov)
     return null
 }
 
@@ -2492,11 +2878,16 @@ export async function abrirCotejoAlta(idEntrada: string): Promise<RespuestaDato<
     const supabase = await createClient()
     const { data: partidas } = await supabase
         .from('partidas_entrada')
-        .select('id, id_categoria, costo_acordado')
+        .select('id, id_categoria, costo_acordado, lleva_ns')
         .eq('id_entrada', idEntrada)
-    const porPartida = new Map<string, { id_categoria: string | null; costo: number }>()
+    const porPartida = new Map<string, { id_categoria: string | null; costo: number; llevaNs: boolean }>()
     for (const p of (partidas ?? [])) {
-        porPartida.set(p.id, { id_categoria: p.id_categoria, costo: Number(p.costo_acordado) })
+        porPartida.set(p.id, {
+            id_categoria: p.id_categoria,
+            costo: Number(p.costo_acordado),
+            // ⭐ MEJORA 52 — la declaración de la PUERTA, para que el alta no invente el flag del SKU.
+            llevaNs: p.lleva_ns ?? false,
+        })
     }
     const ids = (partidas ?? []).map((p) => p.id)
     const [{ data: resueltas }, { data: liberaciones }] = await Promise.all([
@@ -2547,6 +2938,8 @@ export async function abrirCotejoAlta(idEntrada: string): Promise<RespuestaDato<
             cantidad_aprobada: aprobada,
             cantidad_pendiente: Math.max(0, aprobada - liberada),
             costo_acordado: porPartida.get(r.id_partida_entrada)?.costo ?? 0,
+            // ⭐ MEJORA 52 — lo que declaró la puerta: el SKU que nazca de acá lo hereda.
+            lleva_ns: porPartida.get(r.id_partida_entrada)?.llevaNs ?? false,
         }
     })
     return { success: true, data: { lineas } }
@@ -2583,7 +2976,7 @@ export async function listarEtapasDeIngreso(
         .eq('id_entrada', idEntrada)
         .order('tanda', { ascending: true })
         .order('created_at', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const acondicionamiento: LiberacionDeIngreso[] = ((data ?? []) as unknown as {
         id: string
@@ -2693,7 +3086,7 @@ export async function confirmarAlta(input: ConfirmarAltaInput): Promise<Respuest
                 .update({ id_producto: l.id_producto })
                 .eq('id', l.id_partida_resuelta)
                 .select('id')
-            if (errSku) return { success: false, error: errSku.message }
+            if (errSku) return { success: false, error: describirError(errSku) }
             const errFilas = sinEscritura(upd, 'persistir el SKU resuelto')
             if (errFilas) return { success: false, error: errFilas }
         }
@@ -2736,7 +3129,7 @@ export async function generarDivergencia(input: {
         estado: 'abierta',
         creado_por: sesion.userId,
     })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true }
 }
 
@@ -2750,7 +3143,7 @@ export async function listarDivergencias(): Promise<RespuestaLista<Divergencia>>
         )
         .order('created_at', { ascending: false })
         .limit(500)
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const filas = ((data ?? []) as unknown as {
         id: string
         id_entrada: string
@@ -2805,7 +3198,7 @@ export async function resolverDivergencia(
                 .update({ id_producto: l.id_producto })
                 .eq('id', l.id_partida_resuelta)
                 .select('id')
-            if (errSku) return { success: false, error: errSku.message }
+            if (errSku) return { success: false, error: describirError(errSku) }
             const errFilas = sinEscritura(upd, 'persistir el SKU resuelto')
             if (errFilas) return { success: false, error: errFilas }
         }
@@ -2824,7 +3217,7 @@ export async function resolverDivergencia(
             })
             .select('id')
             .single()
-        if (errLote) return { success: false, error: errLote.message }
+        if (errLote) return { success: false, error: describirError(errLote) }
 
         const { data: producto } = await supabase.from('productos').select('stock_actual').eq('id', l.id_producto).single()
         const stockAnterior = Number(producto?.stock_actual ?? 0)
@@ -2840,7 +3233,7 @@ export async function resolverDivergencia(
             origen_id: lote.id,
             creado_por: sesion.userId,
         })
-        if (errMov) return { success: false, error: errMov.message }
+        if (errMov) return { success: false, error: describirError(errMov) }
     }
 
     const { data: divUpd, error: errDiv } = await supabase
@@ -2848,7 +3241,7 @@ export async function resolverDivergencia(
         .update({ estado: 'resuelta' })
         .eq('id', idDivergencia)
         .select('id')
-    if (errDiv) return { success: false, error: errDiv.message }
+    if (errDiv) return { success: false, error: describirError(errDiv) }
     const errDivFilas = sinEscritura(divUpd, 'marcar la divergencia como resuelta')
     if (errDivFilas) return { success: false, error: errDivFilas }
     await supabase.rpc('fn_confirmar_alta', { p_id_entrada: divergencia.id_entrada })

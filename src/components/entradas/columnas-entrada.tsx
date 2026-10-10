@@ -20,6 +20,7 @@ import { FileText } from 'lucide-react'
 import { Pildora } from '@/components/data-table'
 import type { ColumnDefExtension, TonoPildora } from '@/components/data-table'
 import { cn } from '@/lib/utils'
+import { MarcaNueva } from '@/components/entradas/MarcaNueva'
 import type { BandejaLiberada, Entrada, HuellaResuelta, PartidaConAvance } from '@/types/entradas'
 import {
     claveLinea,
@@ -90,8 +91,16 @@ export const columnaFolio: ColumnaEntrada = {
     // ⭐ MEJORA 24 Sep 2026 (usuario) — el folio del ingreso es la IDENTIDAD de la fila: sube de
     // `text-xs` (12px) a `text-[15px]`. ⚠️ Se probó con `font-semibold` y el usuario lo rechazó
     // («no se ve bien lo que pusiste en negritas»): el tamaño hace el trabajo, el peso no.
-    render: (valor) => (
-        <span className="font-mono text-[15px] tabular-nums">{String(valor)}</span>
+    // ⭐ MEJORA 54 (09 Oct 2026) — **LA MARCA DE «NUEVA» VIVE ACÁ**, al lado del folio, porque es
+    // un HECHO DE LA FILA y no de la pantalla: la celda de identidad es donde el ojo ya está
+    // buscando («¿cuál es la que entró?»). `MarcaNueva` se dibuja sola o no se dibuja — si la
+    // fila no es nueva, devuelve `null` y esta celda queda **exactamente** como estaba.
+    // ⚠️ El `gap` y la alineación son de este contenedor: el folio NO cambia de tamaño ni de peso.
+    render: (valor, fila) => (
+        <span className="inline-flex items-center gap-2">
+            <span className="font-mono text-[15px] tabular-nums">{String(valor)}</span>
+            <MarcaNueva idEntrada={fila.id} createdAt={fila.created_at} />
+        </span>
     ),
 }
 
@@ -131,7 +140,9 @@ export const columnaPiezas: ColumnaEntrada = {
     id: 'piezas',
     accessorFn: (e) => e.piezas_total,
     // ⭐ MEJORA 24 Sep 2026 (usuario) — encabezados SINTETIZADOS (no se quita información):
-    // «PZ. RECIBIDAS» → «RECIBIDAS». El dato sigue siendo Σ `cantidad_original`.
+    // «PZ. RECIBIDAS» → «RECIBIDAS». ⭐ MEJORA 52-bis (08 Oct 2026) — el dato pasó de `Σ cantidad_original`
+    // (lo declarado) a `cantidad_vigente` (lo que la partida TIENE): una partida que soltó piezas por
+    // reclasificación decía 4 cuando le quedaban 2. Ver `lineasDePartidas`.
     label: 'RECIBIDAS',
     align: 'derecha',
     movil: 'secundaria',
@@ -561,7 +572,8 @@ export function crearColumnaEstadoRecepcion(
 // Recepción, que ya lee `Recibidas · DEV · Final` con número + barra.
 //
 // ⚠️ Vive aquí (helpers del MÓDULO) y no en cada componente porque la usan DOS superficies de la
-// misma fase: la cola (`columnaAvanceRevision`) y el desglose por partida (`PartidasRevision`).
+// misma fase: la cola (`columnaAvanceRevision`) y el desglose por partida, que desde el 06 Oct 2026
+// hospeda `AvanceRevisionModal` (el contenedor que vivía en la fila se retiró ese día).
 // Recepción tiene su propia `Proporcion` de 2 tramos dentro de `PartidasExpandidas`: unificarlas
 // sería un refactor de una superficie ya validada — no se toca sin pedirlo (queda anotado).
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -734,6 +746,22 @@ export interface LineaPartida {
      * (partida sin revisar) también.
      */
     recibidas: number
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **piezas que SALIERON de esta partida por reclasificación** (la
+     * lectura dijo que no eran de lo que la entrada declaraba y se les creó su propia partida).
+     *
+     * ⚠️ **No es una DEV**: la pieza **no vuelve al proveedor**, sigue en el inventario. Existe para
+     * que el desglose **cierre a la vista**: sin este tramo se veía `RECIBIDAS 5 · DEV — · FINAL 4`
+     * con una pieza sin explicar. Se pinta solo en la **fila de partida** (la pieza se fue entera).
+     */
+    reclasificadas: number
+    /**
+     * ⭐ MEJORA 52 — **las que LLEGARON** a esta partida por reclasificación (la partida nacida): se
+     * pintan `+n` para que su fila cierre, `RECIBIDAS 0 + RECLAS. 1 = FINAL 1`.
+     */
+    reclasificadasEntran: number
+    /** ⭐ MEJORA 52 — cuántas **esperan a Recepción** (`pendiente`): se pinta en la columna `Estado`. */
+    reclasificadasPendientes: number
     /** `true` cuando la partida aún no tiene huellas: la línea es lo DECLARADO en recepción. */
     declarada: boolean
     /** ¿la partida rinde más de un producto? (atenúa el `#` de sus filas de producto) */
@@ -782,7 +810,31 @@ export function lineasDePartidas(partidas: PartidaConAvance[]): LineaPartida[] {
             dev: 0,
             devAjustada: false,
             liberadas: 0,
-            recibidas: Number(p.cantidad_original ?? 0),
+            /**
+             * ⭐ MEJORA 52-bis (08 Oct 2026 · decisión del dueño) — **`Recib.` = LA VERDAD ACTUAL.**
+             *
+             * Antes era `Σ cantidad_original` (lo DECLARADO, inmutable) y por eso una partida a la que
+             * se le fueron piezas por **reclasificación** seguía diciendo **4** cuando le quedaban **2**:
+             * *«el dato de RECIB 4 ya no está diciendo la última verdad… en este caso debería decir 2»*.
+             * Y la partida NACIDA mostraba **0** en su fila de partida contra **2** en su fila de producto.
+             *
+             * Ahora es **`cantidad_vigente`** — el «final» operativo, que ya incluye lo que salió y lo que
+             * llegó. ⇒ las DOS filas coinciden y la columna dice lo que hay.
+             * ⚠️ **No cambia el caso normal**: durante la revisión la DEV no se aplica (se aplica al emitir
+             * la nota) ⇒ `vigente === original` salvo que haya habido una reclasificación.
+             * ⭐ Y **queda coherente con el resto**, que ya usaba la verdad: el **pie** de la tabla
+             * (`piezas_total` = Σ vigente) y la **nota** (`original − DEV ± reclasificación`).
+             * ⚠️ La verdad DECLARADA no se pierde: vive en la **nota** y en **`cantidad_original`**.
+             */
+            recibidas: Number(p.cantidad_vigente ?? 0),
+            /**
+             * ⭐ MEJORA 52 — **lo que salió por reclasificación es de la PARTIDA, no de una huella**:
+             * la pieza se fue entera, así que se pinta en la fila de partida (como el `Faltan` o el
+             * `Estado`) y **0** en las filas de producto — igual que la DEV de partida.
+             */
+            reclasificadas: p.reclasificadas ?? 0,
+            reclasificadasEntran: p.reclasificadas_entran ?? 0,
+            reclasificadasPendientes: p.reclasificadas_pendientes ?? 0,
             declarada: false,
             partidaMultiple: totalLineas > 1,
         })
@@ -801,6 +853,9 @@ export function lineasDePartidas(partidas: PartidaConAvance[]): LineaPartida[] {
                 devAjustada: h?.dev_ajustada ?? false,
                 liberadas: h?.cantidad_liberada ?? 0,
                 recibidas: (h?.cantidad_aprobada ?? 0) + (h?.cantidad_devuelta ?? 0),
+                reclasificadas: 0,
+                reclasificadasEntran: 0,
+                reclasificadasPendientes: 0,
                 declarada: h === null,
                 partidaMultiple: totalLineas > 1,
             })
@@ -820,6 +875,9 @@ export function lineasDePartidas(partidas: PartidaConAvance[]): LineaPartida[] {
                 devAjustada: d.ajustada,
                 liberadas: 0,
                 recibidas: d.cantidad,
+                reclasificadas: 0,
+                reclasificadasEntran: 0,
+                reclasificadasPendientes: 0,
                 declarada: false,
                 partidaMultiple: totalLineas > 1,
             })
@@ -838,9 +896,13 @@ export function productoDeLinea(l: LineaPartida): string {
         .join(' · ')
 }
 
-/** La cantidad de la línea: lo aprobado de su huella, o lo declarado mientras no haya huellas. */
+/**
+ * La cantidad de la línea: lo aprobado de su huella, o **lo que la partida tiene** mientras no haya
+ * huellas (⭐ MEJORA 52-bis: `cantidad_vigente`, no `cantidad_original` — una partida puede haber
+ * soltado piezas por reclasificación **sin** haber producido todavía ninguna huella suya).
+ */
 export function cantidadDeLinea(l: LineaPartida): number {
-    return l.declarada ? l.partida.cantidad_original : l.aprobadas
+    return l.declarada ? l.partida.cantidad_vigente : l.aprobadas
 }
 
 export type ColumnaBandeja = ColumnDef<BandejaLiberada> & ColumnDefExtension<BandejaLiberada>

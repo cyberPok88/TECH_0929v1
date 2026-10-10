@@ -17,6 +17,11 @@
 //  ② EL GATE DE ENTORNO VIVE ACÁ, no solo en la pantalla. Ocultar el botón NO es un
 //     candado: si la action se llama desde otro lado, esta línea es lo único que
 //     impide el borrado. Fail-closed: sin `ENTORNO=desarrollo`, no borra.
+//
+//  ③ ⭐ FIX `g26_p1_b9` (07 Oct 2026) — **EL PAQUETE QUE FALTA VIAJA EN `DETAIL`**. La RPC
+//     sabe qué tabla bloqueó el borrado y de qué paquete es; lo manda en el `DETAIL` del
+//     error para que el modal ofrezca marcarlo **en un clic**, en vez de dejar al usuario
+//     adivinando qué casilla le falta.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { createClient } from '@/lib/supabase/server'
@@ -56,6 +61,23 @@ interface Respuesta<T> {
     success: boolean
     data?: T
     error?: string
+    /**
+     * ⭐ **El paquete que faltaba marcar** cuando una FK de OTRO paquete bloqueó el borrado
+     * (FIX `g26_p1_b9`). Lo manda la RPC en el `DETAIL` del error; el modal lo usa para
+     * ofrecer marcarlo en un clic. Ausente = no hay nada accionable que ofrecer.
+     */
+    paqueteFaltante?: PaqueteBorrado
+}
+
+/**
+ * El paquete que la RPC señaló como faltante, **validado contra la lista blanca**.
+ *
+ * ⚠️ El `DETAIL` viene de la BD: si no es uno de los 11 ids conocidos, se descarta. La UI
+ * nunca marca una casilla a partir de un texto que no reconoce.
+ */
+function paqueteFaltanteDe(detalle: string | null | undefined): PaqueteBorrado | undefined {
+    if (!detalle) return undefined
+    return (PAQUETES as readonly string[]).includes(detalle) ? (detalle as PaqueteBorrado) : undefined
 }
 
 /** Valida que lo que llegó sea un subconjunto de la lista blanca. */
@@ -156,6 +178,12 @@ export async function borrarDatosAction(entrada: {
         p_seleccion: (entrada?.seleccion ?? {}) as never,
         p_reiniciar_folios: entrada?.reiniciarFolios === true,
     })
-    if (error) return { success: false, error: traducirErrorConfiguracion(error.code, error.message) }
+    if (error) {
+        return {
+            success: false,
+            error: traducirErrorConfiguracion(error.code, error.message),
+            paqueteFaltante: paqueteFaltanteDe(error.details),
+        }
+    }
     return { success: true, data: (data ?? []) as FilaConteo[] }
 }

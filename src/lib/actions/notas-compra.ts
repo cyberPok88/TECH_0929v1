@@ -12,6 +12,7 @@
 
 import Decimal from 'decimal.js'
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import {
     notaCancelarSchema,
     notaCrearSchema,
@@ -118,7 +119,7 @@ function traducirErrorNotaCompra(codigo: string | undefined, mensaje: string): s
     if (codigo === '23503') return 'Uno de los valores seleccionados ya no existe (proveedor, producto o estado).'
     if (codigo === '23514') return 'La nota incumple una regla de negocio (cantidades, montos o cancelación).'
     if (codigo === '42501') return 'No tienes permiso para realizar esta acción.'
-    return mensaje
+    return describirError({ message: mensaje, code: codigo }) ?? mensaje
 }
 
 async function sesionActiva(
@@ -169,7 +170,7 @@ export async function listarNotasCompra(
         .order('folio', { ascending: false })
         .range(desde, desde + tamano - 1)
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const notas = ((data ?? []) as unknown as FilaNotaCruda[]).map(aFilaNota)
     return { success: true, data: notas, total: count ?? notas.length }
 }
@@ -202,7 +203,7 @@ export async function listarNotasCompraParaExportar(
         .order('fecha_nota', { ascending: false })
         .order('folio', { ascending: false })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: ((data ?? []) as unknown as FilaNotaCruda[]).map(aFilaNota) }
 }
 
@@ -215,7 +216,7 @@ export async function obtenerNotaCompra(id: string): Promise<RespuestaDato<NotaC
         .select(COLUMNAS_NOTAS)
         .eq('id', id)
         .maybeSingle()
-    if (err1) return { success: false, error: err1.message }
+    if (err1) return { success: false, error: describirError(err1) }
     if (!encabezado) return { success: false, error: 'La nota no existe o no tienes acceso.' }
 
     const { data: filasPartidas, error: err2 } = await supabase
@@ -223,7 +224,7 @@ export async function obtenerNotaCompra(id: string): Promise<RespuestaDato<NotaC
         .select('id, id_nota, id_producto, descripcion, cantidad, costo_acordado, subtotal_partida, orden, productos(sku, nombre)')
         .eq('id_nota', id)
         .order('orden', { ascending: true })
-    if (err2) return { success: false, error: err2.message }
+    if (err2) return { success: false, error: describirError(err2) }
 
     const partidas: PartidaNota[] = ((filasPartidas ?? []) as unknown as Array<{
         id: string
@@ -253,7 +254,7 @@ export async function obtenerNotaCompra(id: string): Promise<RespuestaDato<NotaC
         .select('id, id_nota, fecha_pago, monto, metodo, referencia_bancaria, notas, creado_por, created_at')
         .eq('id_nota', id)
         .order('fecha_pago', { ascending: false })
-    if (err3) return { success: false, error: err3.message }
+    if (err3) return { success: false, error: describirError(err3) }
 
     const pagos = (filasPagos ?? []) as PagoNota[]
 
@@ -282,7 +283,7 @@ export async function listarProductosParaPartida(busqueda = ''): Promise<Respues
     }
 
     const { data, error } = await query.order('nombre', { ascending: true }).limit(30)
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: (data ?? []) as ProductoParaPartida[] }
 }
 
@@ -302,7 +303,7 @@ export async function crearNotaCompraDirecta(
 
     const { data: folio, error: errFolio } = await supabase.rpc('generar_folio', { p_tipo: 'nota_compra' })
     if (errFolio || !folio) {
-        return { success: false, error: errFolio?.message ?? 'No se pudo generar el folio de la nota.' }
+        return { success: false, error: describirError(errFolio) ?? 'No se pudo generar el folio de la nota.' }
     }
 
     const idPendiente = await idEstadoPagoPorClave(supabase, 'pendiente')
@@ -373,7 +374,7 @@ export async function editarNotaCompra(id: string, input: NotaEditarInput): Prom
         .select('id, es_cancelada, estado_fisico, saldo_pendiente, total')
         .eq('id', id)
         .maybeSingle()
-    if (errActual) return { success: false, error: errActual.message }
+    if (errActual) return { success: false, error: describirError(errActual) }
     if (!actual) return { success: false, error: 'La nota no existe o no tienes acceso.' }
 
     if (actual.es_cancelada) return { success: false, error: 'No se puede editar una nota cancelada.' }
@@ -443,7 +444,7 @@ export async function registrarPagoNota(id: string, input: PagoNotaInput): Promi
         .select('id, es_cancelada, saldo_pendiente, total')
         .eq('id', id)
         .maybeSingle()
-    if (errActual) return { success: false, error: errActual.message }
+    if (errActual) return { success: false, error: describirError(errActual) }
     if (!actual) return { success: false, error: 'La nota no existe o no tienes acceso.' }
 
     if (actual.es_cancelada) return { success: false, error: 'No se puede pagar una nota cancelada.' }
@@ -492,7 +493,7 @@ export async function cancelarNotaCompra(id: string, input: NotaCancelarInput): 
         .select('id, es_cancelada, estado_fisico, saldo_pendiente, total')
         .eq('id', id)
         .maybeSingle()
-    if (errActual) return { success: false, error: errActual.message }
+    if (errActual) return { success: false, error: describirError(errActual) }
     if (!actual) return { success: false, error: 'La nota no existe o no tienes acceso.' }
 
     if (actual.es_cancelada) return { success: false, error: 'La nota ya está cancelada.' }

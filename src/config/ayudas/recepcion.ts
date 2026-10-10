@@ -156,7 +156,7 @@ export const AYUDAS_RECEPCION: RegistroAyudas = {
     'recepcion.th-recib': {
         tipo: 'nota',
         donde: 'PartidasExpandidas · Z2, encabezado «Recib.»',
-        texto: 'En la fila de PARTIDA, lo declarado en recepción; en las de producto, las piezas de ese producto.',
+        texto: 'En la fila de PARTIDA, lo que la partida TIENE (ya con lo que salió por reclasificación y lo que llegó); en las de producto, las piezas de ese producto. ⭐ Antes decía lo DECLARADO, y una partida a la que se le fueron piezas seguía diciendo 4 cuando le quedaban 2: la verdad declarada vive en la nota.',
     },
     'recepcion.th-dev': {
         tipo: 'nota',

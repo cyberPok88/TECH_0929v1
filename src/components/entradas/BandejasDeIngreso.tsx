@@ -11,10 +11,11 @@
 //    dentro -t1 -t2 … para que se puedan colapsar y ocultar. Lo mismo sería para entradas por
 //    cotejar, no?»*
 //
-// **No es diseño nuevo: es el patrón que el flujo ya usa.** En Recepción y Revisión la fila padre
-// es la entrada y se despliega su contenido (`renderFilaExpandida` → `PartidasExpandidas` /
-// `PartidasRevision`), y el mecanismo es del **kit 0.8** — la «fila expandible» fue una PROMOCIÓN
-// del 20 Sep que salió de este mismo módulo. Para Almacén ya estaba decidido en el mockup
+// **No es diseño nuevo: es el patrón que el flujo ya usa.** En Recepción la fila padre es la
+// entrada y se despliega su contenido (`renderFilaExpandida` → `PartidasExpandidas`); en Revisión
+// ese despliegue dejó la fila el 06 Oct 2026 y hoy abre `AvanceRevisionModal`. El mecanismo es del
+// **kit 0.8** — la «fila expandible» fue una PROMOCIÓN del 20 Sep que salió de este mismo módulo.
+// Para Almacén ya estaba decidido en el mockup
 // `DOCS/design/entradas/04-almacen/almacen-hub-cotejo-por-tanda.html` §2 (opción **B = recomendada**;
 // «hoy: dos vistas planas» = **descartada** por L6: dos lugares diciendo lo mismo es peor que uno).
 //
@@ -32,6 +33,22 @@
 // estado** (las que de verdad esperan algo en este puesto), así que el conjunto es chico y el tope
 // no puede esconder trabajo. La anatomía del padre es la del mockup de Almacén §2:
 // **Ingreso (folio + de qué está hecho) · En el puesto (tandas y piezas) · Acción del documento**.
+//
+// ⭐ 06 Oct 2026 (Guía 1.6 · Fase 3 · mockup aprobado
+// `DOCS/design/entradas/03-acondicionamiento/01-detalle-acondicionamiento.html`) — **`enModal`**:
+// el chevron de la cola de Acondicionamiento ya no despliega la fila; abre
+// `AcondicionamientoDetalleModal`, que hospeda ESTA MISMA pieza (una sola fuente del display, la
+// doctrina de Recepción). Es la **tercera** aplicación del patrón (`PartidasExpandidas enModal` ·
+// `PartidasAvance enModal`) y son **los mismos 2 ajustes**:
+//   ① el contenedor `h-full min-h-0`, y
+//   ② `shrink-0` en la banda de acciones (Z1) + `min-h-0 flex-1 overflow-y-auto` en la caja de la
+//      tabla (Z2), para que el scroll viva ADENTRO y Z1 no se mueva.
+// ⚠️ **Sin `enModal` el comportamiento es EXACTAMENTE el de hoy**: la pieza la comparte **Almacén**
+// (`AltaCatalogo`, con `densidad="kit"`, `sku` y `agruparPorPartida`), y ahí la fila se sigue
+// desplegando dentro de la tabla.
+// ⚠️ La densidad NO se deduce del ancho (sección de ancho de pantalla): la fija el PUESTO y la
+// declara quien hospeda (`densidad`, default `'puesto'` = la acción de la fila a 52, L8). Acá no
+// se toca: el modal la REENVÍA.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useState } from 'react'
@@ -220,6 +237,22 @@ export interface AccionBandeja {
     dominante?: boolean
 }
 
+/**
+ * Las **ayudas** de los 4 encabezados de Z2 (`title`), ya resueltas por quien hospeda.
+ *
+ * ⚠️ Llegan **por prop** y no se consumen acá con `useAyuda` a propósito: esta pieza es
+ * **compartida con Almacén**, y sus textos son del registro de Acondicionamiento
+ * (`config/ayudas/acondicionamiento.ts`). Cablearlas acá le pondría a Almacén un `title`
+ * del módulo del acondicionador — y cambiaría su DOM, que tiene que quedar igual.
+ * Cada una es **opcional**: sin ella el `<th>` no lleva atributo `title` (como hoy).
+ */
+export interface TitulosDesglose {
+    tanda?: string
+    producto?: string
+    piezas?: string
+    estado?: string
+}
+
 interface BandejasDeIngresoProps {
     bandejas: BandejaLiberada[]
     accion: (b: BandejaLiberada) => AccionBandeja
@@ -227,6 +260,7 @@ interface BandejasDeIngresoProps {
      * ⭐ MEJORA 32 — barra de acciones **masivas del ingreso** («Limpiar todas» · «Terminar y
      * entregar todo»), como la de la fase 2 en el desglose de la entrada. Es un **slot**: la pieza
      * compartida no sabe de reglas de negocio ni de permisos — el puesto decide qué botones pone.
+     * ⭐ 06 Oct 2026 — con `enModal` es la **Z1** del modal y va `shrink-0` (no se mueve con el scroll).
      */
     accionesMasivas?: ReactNode
     /**
@@ -245,6 +279,15 @@ interface BandejasDeIngresoProps {
      * (→ N SKU) salieron de **una** partida declarada (la derivación, L4 · decisión 22.j).
      */
     agruparPorPartida?: boolean
+    /**
+     * ⭐ 06 Oct 2026 (Fase 3 · gate G1) — **la pieza entra en un MODAL**: el contenedor pasa a
+     * `h-full min-h-0`, la banda de acciones a `shrink-0` (Z1) y la caja de la tabla a
+     * `min-h-0 flex-1 overflow-y-auto` (Z2). Y el vacío conserva la banda de Z1 (que sin esto se
+     * perdería con el `return` temprano).
+     */
+    enModal?: boolean
+    /** ⭐ 06 Oct 2026 — los `title` de los 4 encabezados (ver `TitulosDesglose`). */
+    titulos?: TitulosDesglose
 }
 
 /** Una fila de la sub-tabla: la de PARTIDA (resumen) o la de un producto (bandeja). */
@@ -311,6 +354,8 @@ export function BandejasDeIngreso({
     densidad = 'puesto',
     sku = false,
     agruparPorPartida = false,
+    enModal = false,
+    titulos,
 }: BandejasDeIngresoProps) {
     // ⭐ MEJORA 33 — el MISMO gesto de la Fase 1 en el SEGUNDO nivel: la fila de PARTIDA se pliega
     // (`BotonDespliegue` `sm`, kit 0.8) y esconde sus subpartidas. El estado vive aquí porque la
@@ -319,12 +364,33 @@ export function BandejasDeIngreso({
     const alternarPartida = (clave: string) =>
         setPlegadas((prev) => ({ ...prev, [clave]: !prev[clave] }))
 
+    /**
+     * ⭐ 06 Oct 2026 (Fase 3) — **Z1**, la banda de acciones del ingreso. Con `enModal` es fija
+     * (`shrink-0`): no se mueve con el scroll del cuerpo. Sin `enModal` **no lleva clase**: el nodo
+     * envoltorio no agrega ni un atributo al DOM de siempre.
+     */
+    const bandaZ1 = accionesMasivas ? (
+        <div className={enModal ? 'shrink-0' : undefined}>{accionesMasivas}</div>
+    ) : null
+
     if (bandejas.length === 0) {
-        return (
+        const vacio = (
             <p className="text-[13px] text-muted-foreground">
                 Este ingreso no tiene tandas liberadas todavía: lo que le falta a esta etapa es
                 cerrar el documento.
             </p>
+        )
+        // ⚠️ SIN `enModal` el DOM es EXACTAMENTE el de hoy (una sola `<p>`): la ruta compartida con
+        // Almacén no cambia ni un nodo.
+        if (!enModal) return vacio
+        // ⭐ CON `enModal` el vacío **conserva Z1**: es el estado MÁS probable de esta fase (un
+        // ingreso que entró por su documento, sin tandas liberadas) y la banda dice cuál es y por qué
+        // sus 2 puertas están apagadas — el vacío ES la instrucción, no un hueco.
+        return (
+            <div className="flex h-full min-h-0 flex-col gap-3">
+                {bandaZ1}
+                {vacio}
+            </div>
         )
     }
 
@@ -332,17 +398,28 @@ export function BandejasDeIngreso({
     const esKit = densidad === 'kit'
 
     return (
-        <div className="flex flex-col gap-3">
-            {accionesMasivas}
-            <div className="overflow-hidden rounded-md border border-border bg-surface-raised">
+        // ⭐ 06 Oct 2026 (gate G1) — CON `enModal` LA PIEZA LLENA SU HUECO: el diálogo le da una
+        // altura definida y acá adentro **Z1 queda fuera del scroll** (`shrink-0`) mientras **Z2**
+        // es el cuerpo que scrollea (`min-h-0 flex-1`). Sin `enModal` sigue siendo el bloque que
+        // crece con su contenido, como siempre.
+        <div className={cn('flex flex-col gap-3', enModal && 'h-full min-h-0')}>
+            {bandaZ1}
+            <div
+                className={cn(
+                    'overflow-hidden rounded-md border border-border bg-surface-raised',
+                    // Z2 · el cuerpo que scrollea: `min-h-0` (puede encogerse por debajo de su
+                    // contenido) + `flex-1` (se queda con el alto que sobra) + el scroll adentro.
+                    enModal && 'min-h-0 flex-1 overflow-y-auto'
+                )}
+            >
                 <table className="w-full text-[14.5px]">
                 <thead className={CLASE_THEAD_TABLA}>
                     <tr>
-                        <th className={cn(TH, 'w-28 text-left')}>Tanda</th>
-                        <th className={cn(TH, 'text-left')}>Producto</th>
+                        <th className={cn(TH, 'w-28 text-left')} title={titulos?.tanda}>Tanda</th>
+                        <th className={cn(TH, 'text-left')} title={titulos?.producto}>Producto</th>
                         {sku && <th className={cn(TH, 'w-44 text-left')}>SKU que la recibe</th>}
-                        <th className={cn(TH, 'w-20')}>Piezas</th>
-                        <th className={cn(TH, 'w-40')}>Estado</th>
+                        <th className={cn(TH, 'w-20')} title={titulos?.piezas}>Piezas</th>
+                        <th className={cn(TH, 'w-40')} title={titulos?.estado}>Estado</th>
                         <th className={cn(TH, esKit ? 'w-36' : 'w-56')}>
                             <span className="sr-only">Acción</span>
                         </th>

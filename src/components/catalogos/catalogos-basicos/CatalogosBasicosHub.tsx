@@ -29,6 +29,8 @@ const TABS: TabMeta[] = [
   { clave: 'canales_venta', etiqueta: 'Canales de venta', parte: 4 },
   { clave: 'marcas_comerciales', etiqueta: 'Marcas comerciales', parte: 4 },
   { clave: 'tipos_cliente', etiqueta: 'Tipos de cliente', parte: 5 },
+  // ⭐ ANEXIÓN 09 Oct 2026 — la pestaña que 1.9 Cobros necesita (mapa §4: estaba diferida a «V2/1.3»)
+  { clave: 'formas_pago', etiqueta: 'Formas de pago', parte: 4 },
   { clave: 'listas_precios', etiqueta: 'Listas de precios', parte: 5 },
   { clave: 'vendedores', etiqueta: 'Vendedores', parte: 8 },
   { clave: 'marcas_producto', etiqueta: 'Marcas de producto', parte: 4 },

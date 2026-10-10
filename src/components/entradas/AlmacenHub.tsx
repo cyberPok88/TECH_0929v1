@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ALMACÉN HUB — aterrizaje del PUESTO de Almacén (Guía 1.6 · Fase 4)
@@ -31,6 +31,7 @@ import { FichaAcceso } from '@/components/ui/FichaAcceso'
 import { usePageConfig } from '@/hooks/usePageConfig'
 import { listarEntradas, listarTandas } from '@/lib/actions/entradas'
 import { useAuth } from '@/lib/stores/auth-store'
+import { useContadorEtapa } from '@/lib/stores/avisos-entradas-store'
 
 const RUTA = '/dashboard/entradas/alta'
 
@@ -105,6 +106,11 @@ export function AlmacenHub() {
         path: RUTA,
     })
 
+    // ⭐ MEJORA 53 (09 Oct 2026) — el panel de Almacén cuenta trabajo pendiente (tandas y
+    // documentos en `en_almacen`): sin esto, el número que ve el almacenista se queda viejo
+    // hasta que alguien recarga. El contador lo publica `AvisosEntradas` (Realtime).
+    const avisoAlmacen = useContadorEtapa('almacen')
+
     useEffect(() => {
         let activo = true
         void (async () => {
@@ -124,7 +130,7 @@ export function AlmacenHub() {
         return () => {
             activo = false
         }
-    }, [])
+    }, [avisoAlmacen])
 
     const fichas = FICHAS.filter((f) => puedeVerPagina(f.href))
 

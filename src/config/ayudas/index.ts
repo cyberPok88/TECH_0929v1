@@ -1,4 +1,4 @@
-﻿// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // AYUDAS — EL REGISTRO DEL ESTÁNDAR (MEJORA 47 · 04 Oct 2026 · ext. Guía 2.4)
 //
 // Un módulo = un archivo en `src/config/ayudas/<modulo>.ts`. Acá se juntan todos y
@@ -15,6 +15,8 @@
 //    `textosDe()`, que es lo que permite ofrecer **una casilla por texto**.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { AYUDAS_ACONDICIONAMIENTO } from '@/config/ayudas/acondicionamiento'
+import { AYUDAS_ALTA } from '@/config/ayudas/alta'
 import { AYUDAS_RECEPCION } from '@/config/ayudas/recepcion'
 import { AYUDAS_REVISION } from '@/config/ayudas/revision'
 import { AYUDAS_VENTAS } from '@/config/ayudas/ventas'
@@ -28,6 +30,12 @@ import { TIPOS_AYUDA, type DefinicionAyuda, type RegistroAyudas, type TipoAyuda 
 export const AYUDAS: Record<string, RegistroAyudas> = {
     recepcion: AYUDAS_RECEPCION,
     revision: AYUDAS_REVISION,
+    // ⭐ 06 Oct 2026 (Guía 1.6 · Fase 3) — el puesto del acondicionador estrena su registro:
+    // sus 3 `title` inline y los 4 encabezados de Z2 dejan de ser prosa que no se puede apagar.
+    acondicionamiento: AYUDAS_ACONDICIONAMIENTO,
+    // ⭐ 08 Oct 2026 (Guía 1.6 · Fase 5) — el puesto de Almacén estrena su registro: el candado de
+    // la cantidad FÍSICA editable deja de ser prosa que no se puede apagar.
+    alta: AYUDAS_ALTA,
     ventas: AYUDAS_VENTAS,
 }
 
@@ -43,6 +51,12 @@ export const MODULOS_CON_AYUDAS: string[] = Object.keys(AYUDAS)
 export const NOMBRE_MODULO: Record<string, string> = {
     recepcion: 'Entradas · Recepción',
     revision: 'Entradas · Revisión',
+    // ⭐ Sin esta línea el interruptor mostraría la **clave cruda** (`acondicionamiento`),
+    // que es el defecto que la Guía 2.4 vino a arreglar.
+    acondicionamiento: 'Entradas · Acondicionamiento',
+    // ⭐ Sin esta línea el interruptor mostraría la **clave cruda** (`alta`) — el defecto que la
+    // Guía 2.4 vino a arreglar, aplicado al módulo que nace hoy.
+    alta: 'Entradas · Alta en Almacén',
     ventas: 'Ventas · Notas de remisión',
 }
 

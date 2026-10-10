@@ -11,6 +11,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import {
     clienteAltaSchema,
     clienteEditarSchema,
@@ -161,7 +162,7 @@ function traducirErrorCliente(codigo: string | undefined, mensaje: string): stri
     if (codigo === '23503') return 'Uno de los valores seleccionados ya no existe (catálogo).'
     if (codigo === '23514') return 'El registro incumple una regla de negocio (crédito o suspensión).'
     if (codigo === '42501') return 'No tienes permiso para realizar esta acción.'
-    return mensaje
+    return describirError({ message: mensaje, code: codigo }) ?? mensaje
 }
 
 // ── Listar clientes (filtros · default TODOS — decisión usuario 04 Sep) ───────
@@ -192,7 +193,7 @@ export async function listarClientes(
     }
 
     const { data, error } = await query.order('nombre_comercial', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const clientes = ((data ?? []) as unknown as FilaClienteCruda[]).map(aFila)
     return { success: true, data: clientes }
@@ -212,7 +213,7 @@ export async function listarClientesActivos(): Promise<RespuestaLista<ClienteOpc
         .eq('es_activo', true)
         .order('nombre_comercial', { ascending: true })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: (data ?? []) as ClienteOpcion[] }
 }
 
@@ -232,7 +233,7 @@ export async function crearCliente(input: ClienteAltaInput): Promise<RespuestaAc
         p_tipo: 'cliente',
     })
     if (errFolio || !codigo) {
-        return { success: false, error: errFolio?.message ?? 'No se pudo generar el código del cliente.' }
+        return { success: false, error: describirError(errFolio) ?? 'No se pudo generar el código del cliente.' }
     }
 
     const { data: fila, error } = await supabase
@@ -317,7 +318,7 @@ export async function crearClienteRapido(
         p_tipo: 'cliente',
     })
     if (errFolio || !codigo) {
-        return { success: false, error: errFolio?.message ?? 'No se pudo generar el código del cliente.' }
+        return { success: false, error: describirError(errFolio) ?? 'No se pudo generar el código del cliente.' }
     }
 
     const { data: tipoPublico } = await supabase
@@ -376,7 +377,7 @@ export async function obtenerCliente(id: string): Promise<RespuestaDato<Cliente>
         .eq('id', id)
         .maybeSingle()
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     if (!data) return { success: false, error: 'El cliente no existe.' }
 
     const cruda = data as unknown as FilaClienteCrudaConHijas
@@ -639,7 +640,7 @@ export async function listarBitacoraCliente(
         .eq('id_cliente', idCliente)
         .order('created_at', { ascending: false })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const eventos = ((data ?? []) as unknown as {
         id: string

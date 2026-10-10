@@ -4,6 +4,8 @@
 // REVISION CATALOGO — Cola del técnico (Guía 1.6 · P3 · Smart)
 // Lista todas las entradas; "Revisar" (pendiente) abre el wizard · "Resultado"
 // (revisada+) abre el resumen. Paginación servidor.
+// ⭐ 06 Oct 2026 (Fase 2 · mockup aprobado) — el **chevron YA NO DESPLIEGA la fila**: abre
+// `AvanceRevisionModal` con el mismo desglose (`PartidasAvance enModal`), ya interactivo.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -15,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { usePageConfig } from '@/hooks/usePageConfig'
 import { useCanAction } from '@/hooks/useCanAction'
 import { listarEntradas } from '@/lib/actions/entradas'
+import { useAvisosEntradasStore, useContadorEtapa } from '@/lib/stores/avisos-entradas-store'
 import type { Entrada, FiltrosEntradas, PartidaConAvance } from '@/types/entradas'
 import {
     RevisionFilters,
@@ -24,7 +27,7 @@ import {
 } from '@/components/entradas/RevisionFilters'
 import { WizardRevision } from '@/components/entradas/revision/WizardRevision'
 import { ResultadoRevisionModal } from '@/components/entradas/ResultadoRevisionModal'
-import { PartidasRevision } from '@/components/entradas/PartidasRevision'
+import { AvanceRevisionModal } from '@/components/entradas/AvanceRevisionModal'
 import { AjusteDevModal } from '@/components/entradas/AjusteDevModal'
 import { LiberarAvanceModal } from '@/components/entradas/LiberarAvanceModal'
 import { DocumentoImprimible } from '@/components/imprimibles'
@@ -74,26 +77,38 @@ export function RevisionCatalogo() {
     /** ⭐ MEJORA 28 — la huella exacta cuando la partida rindió varias marcas. */
     const [liberarGrupo, setLiberarGrupo] = useState<string | null>(null)
     /**
-     * ⭐ FIX 25 Sep 2026 (usuario) — **el desglose también se refresca**. `PartidasRevision` trae sus
+     * ⭐ FIX 25 Sep 2026 (usuario) — **el desglose también se refresca**. El desglose trae sus
      * propios datos (`listarPartidasConAvance`) en un `useState` con `useEffect`, así que recargar la
      * LISTA no lo toca: al liberar, la fila que se abrió seguía mostrando sus «Liberar n» y sus cifras
      * viejas *«hasta que cierro los detalles y los vuelvo a abrir»*. Este contador entra en las
      * dependencias del efecto del desglose. Sube al guardar la liberación, el ajuste de la DEV y el
      * wizard (los tres cambian lo que el desglose pinta).
+     * ⭐ 06 Oct 2026 — el desglose vive en el MODAL: el contador se le pasa a `AvanceRevisionModal`
+     * (mismo contrato), y el efecto que re-consulta es el suyo.
      */
     const [refresco, setRefresco] = useState(0)
     /**
-     * ⭐ MEJORA 34 (usuario) — **varios detalles pueden estar abiertos** (la tabla lo permite), así que
-     * se guardan **todos** y el botón apunta al **último que se abrió de los que siguen abiertos**. Al
-     * plegar uno se suelta **ese** —y si no queda ninguno, el botón vuelve a gris—.
-     * El defecto medido: al cerrar los detalles la toolbar se quedaba con esa entrada y su botón seguía
-     * activo (*«tengo que abrir otro para que cambie»*).
+     * ⭐ MEJORA 34 (usuario) — **quién es «el detalle abierto» para la toolbar de la PÁGINA**.
+     * El desglose le presta sus datos (`onDatos`) y al cerrarse los suelta; el botón «Imprimir
+     * revisión» apunta al último que sigue abierto.
+     * ⭐ 06 Oct 2026 (gate G8) — **la fuente CAMBIÓ**: era el `onDatos` de la fila expandida (el
+     * contenedor que este cambio retiró) y ahora es el `onDatos` de `AvanceRevisionModal`. Sin
+     * re-apuntarla, el botón de la toolbar quedaba apagado para siempre. El contrato es idéntico.
      */
     const [abiertos, setAbiertos] = useState<
         { entrada: Entrada; partidas: PartidaConAvance[] }[]
     >([])
+    /**
+     * ⭐ 06 Oct 2026 — la entrada cuyo desglose se está mirando en el MODAL. Es PRESENTACIONAL
+     * (SPEC §5③): no carga nada ni decide permisos — la carga y las 4 acciones las sigue resolviendo
+     * este catálogo, que es donde están sus efectos.
+     */
+    const [detalleRevision, setDetalleRevision] = useState<Entrada | null>(null)
     const [acta, setActa] = useState(false)
-    /** ⚠️ Memoizado: entra en las dependencias del efecto del desglose (si cambiara, re-consultaría). */
+    /**
+     * ⚠️ Memoizado: entra en las dependencias del efecto del desglose (si cambiara, re-consultaría).
+     * ⭐ 06 Oct 2026 — lo alimenta el `onDatos` del **modal** (antes, el de la fila expandida).
+     */
     const alCargarDesglose = useCallback(
         (idEntrada: string, datos: { entrada: Entrada; partidas: PartidaConAvance[] } | null) => {
             setAbiertos((prev) => {
@@ -103,10 +118,36 @@ export function RevisionCatalogo() {
         },
         []
     )
-    /** El objetivo de la impresión de la página: el último abierto que **sigue** abierto. */
+    /**
+     * El objetivo de la impresión de la página: el detalle abierto del que se tienen datos.
+     * ⭐ 06 Oct 2026 — con el desglose en un MODAL hay UNO a la vez (el acordeón lo garantizaba
+     * antes con `unaFilaExpandida`): la lista conserva su forma —soltar uno y agregar otro— porque
+     * el contrato de `onDatos` es el mismo y así la toolbar no cambia una línea.
+     */
     const detalle = abiertos[abiertos.length - 1] ?? null
 
     const puedeEditar = useCanAction(RUTA, 'editar')
+
+    /**
+     * ⭐ MEJORA 53 (09 Oct 2026) — **LA COLA SE DESPIERTA SOLA.** Este contador sube cuando
+     * Realtime avisa que llegó trabajo a ESTA etapa (lo publica `AvisosEntradas`, montado una
+     * sola vez en el layout del dashboard: entre hermanos no hay props que bajen). Entra en las
+     * dependencias del efecto de carga y con eso la fila nueva aparece **sin recargar la
+     * página** — que es literalmente el pedido del dueño del 09 Oct 2026.
+     * ⚠️ NO se reusa el `refresco` de abajo: aquel es del DESGLOSE (lo sube guardar/liberar) y
+     *    mezclarlos haría que un aviso ajeno recargara el modal abierto. Son dos relojes.
+     */
+    const avisoRevision = useContadorEtapa('revision')
+
+    /**
+     * ⭐ MEJORA 54 (09 Oct 2026) — **LA SEGUNDA PUERTA DEL PULSO.** La marca de «nueva»
+     * (módulo `MarcaNueva`) tiene dos razones: la RECENCIA se apaga sola con el reloj, y el
+     * PULSO —el «llegó mientras mirabas»— se apaga cuando el operario **abre** la entrada.
+     * Esta cola tiene **dos caminos** para abrirla y los dos lo apagan: el **chevron**
+     * (`onDesplegar`) y el botón **«Revisar ahora»**. Es la decisión del dueño del 09 Oct
+     * 2026 (*«al abrir la entrada»*), tomada sobre las dos puertas reales y no sobre una.
+     */
+    const apagarNuevaEnVivo = useAvisosEntradasStore((s) => s.apagarNuevaEnVivo)
 
     useEffect(() => {
         let activo = true
@@ -123,7 +164,7 @@ export function RevisionCatalogo() {
         return () => {
             activo = false
         }
-    }, [filtros, pagina, tamano])
+    }, [filtros, pagina, tamano, avisoRevision])
 
     const recargar = useCallback(async () => {
         setEstadoTabla('loading')
@@ -135,6 +176,15 @@ export function RevisionCatalogo() {
         setEntradas(res.data ?? [])
         setTotal(res.total ?? 0)
         setEstadoTabla('idle')
+        // ⭐ 06 Oct 2026 — EL DETALLE ABIERTO SE RE-APUNTA AL OBJETO FRESCO, igual que en Recepción.
+        // Mientras el desglose vivía en la fila, la recarga lo refrescaba SOLA: el padre reemplazaba
+        // los objetos y el efecto del contenedor retirado (que dependía de `entrada`) volvía a correr.
+        // El modal guarda su propia entrada, así que sin esto se quedaría mostrando el estado viejo
+        // justo después de ajustar la DEV o liberar (que es lo que acaba de pasar detrás). No cambia
+        // el alcance: es la MISMA entrada, con el objeto recargado.
+        setDetalleRevision((prev) =>
+            prev ? ((res.data ?? []).find((e) => e.id === prev.id) ?? prev) : prev
+        )
     }, [filtros, pagina, tamano])
 
     const manejarFiltros = useCallback((patch: Partial<FiltrosEntradas>) => {
@@ -186,6 +236,10 @@ export function RevisionCatalogo() {
                         disabled={!puedeEditar}
                         title={puedeEditar ? undefined : 'No tienes permiso para revisar entradas.'}
                         onClick={() => {
+                            // ⭐ MEJORA 54 — ABRIR la entrada apaga el pulso de «nueva»
+                            // (decisión del dueño, 09 Oct 2026). La marca por RECENCIA
+                            // se queda: eso es un hecho con fecha, no una novedad.
+                            apagarNuevaEnVivo(fila.id)
                             setPartidaInicial(undefined)
                             setRevisando(fila)
                         }}
@@ -196,7 +250,10 @@ export function RevisionCatalogo() {
                 )
             },
         }),
-        [puedeEditar]
+        // ⚠️ `apagarNuevaEnVivo` va en las dependencias (MEJORA 54): es un MÉTODO del
+        // store —referencia estable, así que no re-crea la columna— pero dejarlo fuera
+        // enciende el warning de `exhaustive-deps`, y un warning nuevo tapa los 5 viejos.
+        [puedeEditar, apagarNuevaEnVivo]
     )
 
     // ⭐ MEJORA 24 Sep 2026 (Fase 2 · Revisión) — la cola del técnico.
@@ -248,6 +305,9 @@ export function RevisionCatalogo() {
      * los detalles de una entrada están abiertos**: el desglose le presta sus datos (`onDatos`) y
      * mientras no haya ninguno abierto el botón queda **apagado diciendo por qué** (`title`) — la SPEC
      * §2.3 prohíbe deshabilitar sin motivo.
+     * 🔴 G8 (06 Oct 2026) — la fuente de `detalle` se **re-apuntó al modal**: era la fila expandida,
+     * que este cambio retira. Sin esto el botón quedaba apagado para siempre (una regresión, no un
+     * detalle). El texto del `disabled` NO se cataloga: es **bandera** (vaciarlo dejaría el botón mudo).
      */
     const acciones = useMemo<ToolbarAction[]>(
         () => [
@@ -308,38 +368,25 @@ export function RevisionCatalogo() {
                     setTamano(n)
                     setPagina(1)
                 }}
-                // ⭐ MEJORA 20 Sep — acordeón: el técnico despliega las PARTIDAS del
-                // ingreso y elige cuál iniciar (espejo del acordeón de la V5).
-                // ⭐ MEJORA 24 Sep 2026 (Fase 2) — el desglose ya no es sólo «elegir partida»:
-                // cuenta la evolución (② la píldora «n malas» abre la DEV de ESA partida;
-                // ③ avance con barra; «Ver resultado» cuando la partida cerró).
-                // ⭐ MEJORA 34 (usuario, 27 Sep 2026) — **un detalle a la vez**: la toolbar de la página
-                // imprime «los detalles», y con dos abiertos tendría que elegir. El acordeón lo evita.
-                unaFilaExpandida
-                renderFilaExpandida={(e) => (
-                    <PartidasRevision
-                        entrada={e}
-                        refresco={refresco}
-                        onDatos={alCargarDesglose}
-                        // ⭐ FIX 25 Sep 2026 (30-bis) — ESTA cola se opera con el dedo (el mismo
-                        // `modoTactil` que lleva la tabla): sus puertas miden 44, no los 32 del kit.
-                        tactil
-                        onIniciar={(idPartida) => {
-                            setPartidaInicial(idPartida)
-                            setRevisando(e)
-                        }}
-                        onVerDev={(entrada, idPartida) => {
-                            setDevPartida(idPartida)
-                            setDevEntrada(entrada)
-                        }}
-                        onVerResultado={(entrada) => setResultado(entrada)}
-                        onLiberar={(entrada, idPartida, idGrupo) => {
-                            setLiberarPartida(idPartida)
-                            setLiberarGrupo(idGrupo ?? null)
-                            setLiberarEntrada(entrada)
-                        }}
-                    />
-                )}
+                // ⭐ 06 Oct 2026 (Fase 2 · mockup aprobado · decisión D1-A) — **EL CHEVRON YA NO
+                // DESPLIEGA LA FILA: ABRE EL MODAL** (el opt-in `DataTable.onDesplegar`, el mismo
+                // que estrenó Recepción). El desglose vivía dentro de la fila y competía con la
+                // lista: la empujaba ≈260px con 1 partida y ≈1100px con 16, la teñía y perdía el
+                // scroll. Acá solo se elige QUÉ entrada se mira; el contenido, la carga y las
+                // acciones los resuelve el `PartidasAvance` que hospeda el modal.
+                // ⚠️ Ya NO se pasa `renderFilaExpandida` (ni `unaFilaExpandida`): la tabla, sus
+                // columnas, sus filtros y su toolbar NO cambian — solo cambia a dónde lleva el
+                // chevron. El acordeón «un detalle a la vez» (MEJORA 34) queda cubierto por el
+                // propio modal: siempre hay UN detalle abierto. ⚠️ El camino viejo sigue intacto
+                // para los CRUDs que SÍ despliegan la fila (Acondicionamiento · Alta · Notas).
+                onDesplegar={(e) => {
+                    // ⭐ MEJORA 54 — la 1ª de las dos puertas que apagan el pulso (ver arriba).
+                    apagarNuevaEnVivo(e.id)
+                    setDetalleRevision(e)
+                }}
+                // ⭐ El nombre accesible del chevron dice el FOLIO, no el UUID de la fila
+                // («Abrir ING-0004» en vez de «Abrir la fila 94a2cbe9-…»).
+                etiquetaFila={(e) => e.folio}
                 showColumnSelector
             />
             {/* La devolución de la partida (②): el MISMO modal de Recepción, acotado a esa partida
@@ -361,6 +408,46 @@ export function RevisionCatalogo() {
                     // esto, lo que acaba de cambiar seguía viéndose viejo hasta cerrar el acordeón.
                     setRefresco((n) => n + 1)
                 }}
+            />
+            {/* ⭐ 06 Oct 2026 — **EL DESGLOSE DE LA REVISIÓN, EN MODAL**: el chevron de la fila ya
+                no la despliega, abre esto (mismo contenido: `PartidasAvance enModal`).
+                🔴 G7 — las 4 puertas bajan del CRUD: el modal las REENVÍA al desglose y jamás las
+                inventa. El modal no mira permisos; si una puerta no llega, no se pinta.
+                `key` CALIFICADA (`detalle-…`, gate G6): hay hermanos montados con `key` y una
+                cuarta con el placeholder SIN calificar chocaría con `WizardRevision` —los dos
+                cerrados son `'ninguna'`— → «Encountered two children with the same key,
+                ninguna», el defecto medido el 24 Sep 2026. */}
+            <AvanceRevisionModal
+                key={`detalle-${detalleRevision?.id ?? 'ninguna'}`}
+                open={detalleRevision !== null}
+                onOpenChange={(abierto) => {
+                    if (!abierto) setDetalleRevision(null)
+                }}
+                entrada={detalleRevision}
+                // ⭐ FIX 25 Sep 2026 — ESTA cola se opera con el dedo (el mismo `modoTactil` que
+                // lleva la tabla): sus puertas miden 44, no los 32 del kit. Se REENVÍA; no se
+                // deduce del ancho.
+                tactil
+                onIniciar={(idPartida) => {
+                    setPartidaInicial(idPartida)
+                    setRevisando(detalleRevision)
+                }}
+                onVerDev={(entrada, idPartida) => {
+                    setDevPartida(idPartida)
+                    setDevEntrada(entrada)
+                }}
+                onVerResultado={(entrada) => setResultado(entrada)}
+                onLiberar={(entrada, idPartida, idGrupo) => {
+                    setLiberarPartida(idPartida)
+                    setLiberarGrupo(idGrupo ?? null)
+                    setLiberarEntrada(entrada)
+                }}
+                // 🔴 G8 — el desglose del modal le PRESTA sus datos a la toolbar de la PÁGINA: es la
+                // fuente que reemplaza al `onDatos` de la fila expandida, que este cambio retiró.
+                // Sin esto, «Imprimir revisión» quedaba apagado para siempre.
+                onDatos={alCargarDesglose}
+                // ⭐ FIX 25 Sep 2026 — y se re-consulta cuando algo cambia lo que pinta.
+                refresco={refresco}
             />
             <WizardRevision
                 key={revisando?.id ?? 'ninguna'}

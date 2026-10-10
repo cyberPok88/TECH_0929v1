@@ -24,6 +24,7 @@
 // que esta parte todavía no usa **rompe `tsc` con TS6133**). ⇒ **NO adelantes imports de las
 // Partes 3–5 a este encabezado.**
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import type {
     ClaveEstadoPagoNota,
     FiltrosNotaRemision,
@@ -186,7 +187,7 @@ export async function listarNotasRemision(
         .order('folio', { ascending: false })
         .range(desde, desde + tamano - 1)
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const notas = ((data ?? []) as unknown as FilaNotaCruda[]).map(aFilaNota)
     return { success: true, data: notas, total: count ?? notas.length }
 }
@@ -221,7 +222,7 @@ export async function listarVentasParaExportar(
         .order('fecha_emision', { ascending: false })
         .order('folio', { ascending: false })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: ((data ?? []) as unknown as FilaNotaCruda[]).map(aFilaNota) }
 }
 
@@ -257,7 +258,7 @@ export async function listarPartidasNota(
         .eq('id_nota', id_nota)
         .order('orden', { ascending: true })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: ((data ?? []) as unknown as FilaPartidaCruda[]).map(aFilaPartida) }
 }
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -340,7 +341,7 @@ export async function resolverPrecioPartida(
         .select('precio_base, precio_minimo, maneja_numero_serie')
         .eq('id', id_producto)
         .maybeSingle()
-    if (errProd) return { success: false, error: errProd.message }
+    if (errProd) return { success: false, error: describirError(errProd) }
     if (!producto) return { success: false, error: 'El producto no existe.' }
 
     // ⭐ FIX 02 Oct 2026 — LA LISTA LA TRAE **EL CLIENTE**, NO EL PRODUCTO. Medido contra la BD:
@@ -358,7 +359,7 @@ export async function resolverPrecioPartida(
         .select('id_lista_precio')
         .eq('id', id_cliente)
         .maybeSingle()
-    if (errCli) return { success: false, error: errCli.message }
+    if (errCli) return { success: false, error: describirError(errCli) }
 
     let porcentajeLista = 0
     /** ⭐ `g12_a4_b1` (05 Oct 2026) — la lista puede **subir** el precio: el signo lo da `tipo_ajuste`. */
@@ -369,7 +370,7 @@ export async function resolverPrecioPartida(
             .select('porcentaje_descuento, tipo_ajuste')
             .eq('id', cliente.id_lista_precio)
             .maybeSingle()
-        if (errLista) return { success: false, error: errLista.message }
+        if (errLista) return { success: false, error: describirError(errLista) }
         porcentajeLista = Number(lista?.porcentaje_descuento ?? 0)
         esIncremento = lista?.tipo_ajuste === 'incremento'
     }
@@ -394,7 +395,7 @@ export async function resolverPrecioPartida(
         .select('id', { count: 'exact', head: true })
         .eq('id_producto', id_producto)
         .gt('cantidad_disponible', 0)
-    if (errLotes) return { success: false, error: errLotes.message }
+    if (errLotes) return { success: false, error: describirError(errLotes) }
 
     return {
         success: true,
@@ -421,7 +422,7 @@ function traducirErrorEmision(codigo: string | undefined, mensaje: string): stri
     if (codigo === '23503') return 'Falta un dato relacionado (cliente, producto o impuesto).'
     if (codigo === '23514') return 'Algún dato no cumple una regla de la nota. Revisa precios y cantidades.'
     if (codigo === '42501') return 'No tienes permiso para emitir notas de remisión.'
-    return mensaje || 'No se pudo emitir la nota.'
+    return describirError({ message: mensaje, code: codigo }) || 'No se pudo emitir la nota.'
 }
 
 // ── ⭐ EMITIR (R15 · R27 · R6 · R38 · R32 · R32③ · R9 · R11–R14 · R22 · R30 · R8 · R10) ────────
@@ -452,7 +453,7 @@ export async function crearNotaRemisionDirecta(
         .select('id, id_marca_comercial, id_lista_precio, dias_credito, id_vendedor_asignado')
         .eq('id', d.id_cliente)
         .maybeSingle()
-    if (errCli) return { success: false, error: errCli.message }
+    if (errCli) return { success: false, error: describirError(errCli) }
     if (!cliente) return { success: false, error: 'El cliente no existe.' }
 
     // ── ⭐ LA CASCADA, RE-DERIVADA CONTRA LA BD (el navegador NO manda precios base) ──
@@ -461,7 +462,7 @@ export async function crearNotaRemisionDirecta(
         .from('productos')
         .select('id, precio_base, maneja_numero_serie')
         .in('id', idsProducto)
-    if (errProd) return { success: false, error: errProd.message }
+    if (errProd) return { success: false, error: describirError(errProd) }
 
     // ⭐ FIX 02 Oct 2026 — EL MISMO DEFECTO QUE EN `resolverPrecioPartida`, y acá es el que MANDA
     //    (estos snapshots son los que viajan al RPC): `productos` **NO tiene FK a `listas_precios`**
@@ -477,7 +478,7 @@ export async function crearNotaRemisionDirecta(
             .select('porcentaje_descuento, tipo_ajuste')
             .eq('id', cliente.id_lista_precio)
             .maybeSingle()
-        if (errLista) return { success: false, error: errLista.message }
+        if (errLista) return { success: false, error: describirError(errLista) }
         porcentajeLista = Number(lista?.porcentaje_descuento ?? 0)
         esIncremento = lista?.tipo_ajuste === 'incremento'
     }
@@ -662,7 +663,7 @@ export async function obtenerNotaRemision(
         .select(COLUMNAS_NOTAS)
         .eq('id', id)
         .maybeSingle()
-    if (errNota) return { success: false, error: errNota.message }
+    if (errNota) return { success: false, error: describirError(errNota) }
     if (!nota) return { success: false, error: 'La nota no existe.' }
 
     const { data: partidas, error: errPart } = await supabase
@@ -670,7 +671,7 @@ export async function obtenerNotaRemision(
         .select('*, series_partida(ns)')
         .eq('id_nota', id)
         .order('orden', { ascending: true })
-    if (errPart) return { success: false, error: errPart.message }
+    if (errPart) return { success: false, error: describirError(errPart) }
 
     // El embudo del libro: Σ cargos · Σ abonos · cuántos asientos (R1).
     // ⚠️ Se suman los ASIENTOS, no los saldos: el saldo lo dice `saldo_pendiente`.
@@ -678,7 +679,7 @@ export async function obtenerNotaRemision(
         .from('movimientos_cxc')
         .select('naturaleza, monto')
         .eq('id_nota_remision', id)
-    if (errMov) return { success: false, error: errMov.message }
+    if (errMov) return { success: false, error: describirError(errMov) }
 
     const filas = (movs ?? []) as { naturaleza: 'cargo' | 'abono'; monto: number }[]
     const totalCargos = filas
@@ -723,7 +724,7 @@ export async function editarNotaRemision(
         .select('id, es_cancelada, fecha_emision, folio')
         .eq('id', id)
         .maybeSingle()
-    if (errLeer) return { success: false, error: errLeer.message }
+    if (errLeer) return { success: false, error: describirError(errLeer) }
     if (!actual) return { success: false, error: 'La nota no existe.' }
     if (actual.es_cancelada) {
         return { success: false, error: `La nota ${actual.folio} está cancelada: no se puede editar.` }
@@ -743,7 +744,7 @@ export async function editarNotaRemision(
         })
         .eq('id', id)
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true }
 }
 
@@ -765,7 +766,7 @@ export async function consultarEstadoCuentaCliente(
         .select('id, codigo, nombre_comercial, saldo_actual')
         .eq('id', id_cliente)
         .maybeSingle()
-    if (errCli) return { success: false, error: errCli.message }
+    if (errCli) return { success: false, error: describirError(errCli) }
     if (!cliente) return { success: false, error: 'El cliente no existe.' }
 
     // ⚠️ «VENCIDO» es una FECHA contra hoy, no un estado guardado: un campo `es_vencida` habría que
@@ -778,7 +779,7 @@ export async function consultarEstadoCuentaCliente(
         .eq('es_cancelada', false)
         .gt('saldo_pendiente', 0)
         .lt('fecha_vencimiento', hoy)
-    if (errVenc) return { success: false, error: errVenc.message }
+    if (errVenc) return { success: false, error: describirError(errVenc) }
 
     const saldoVencido = ((vencidas ?? []) as { saldo_pendiente: number }[]).reduce(
         (s, n) => s + Number(n.saldo_pendiente),
@@ -798,7 +799,7 @@ export async function consultarEstadoCuentaCliente(
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .range(desde, desde + tamano - 1)
-    if (errMov) return { success: false, error: errMov.message }
+    if (errMov) return { success: false, error: describirError(errMov) }
 
     interface FilaMovCruda {
         id: string
@@ -848,7 +849,7 @@ export async function listarConceptosCxC(): Promise<RespuestaLista<ConceptoCxC>>
         .select('*')
         .eq('es_activo', true)
         .order('orden', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: (data ?? []) as unknown as ConceptoCxC[] }
 }
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -978,7 +979,7 @@ export async function listarPartidasDeProducto(
         .order('fecha_emision', { referencedTable: 'notas_remision', ascending: false })
         .range(desde, desde + tamano - 1)
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const filas = ((data ?? []) as unknown as FilaPartidaVendidaCruda[]).map(aPartidaVendida)
     return { success: true, data: filas, total: count ?? 0 }
 }

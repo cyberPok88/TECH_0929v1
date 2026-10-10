@@ -13,6 +13,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { passwordSchema } from '@/lib/validations/password'
 import { usuarioCrearSchema, usuarioEditarSchema } from '@/lib/validations/usuarios'
@@ -48,7 +49,7 @@ interface FilaUsuarioCruda {
 function traducirErrorUsuario(codigo: string | undefined, mensaje: string): string {
     if (codigo === '23505') return 'Ya existe un usuario con ese correo.'
     if (codigo === '23503') return 'El rol seleccionado no existe.'
-    return mensaje
+    return describirError({ message: mensaje, code: codigo }) ?? mensaje
 }
 
 // ── Listar usuarios ─────────────────────────────────────────────────────────
@@ -79,7 +80,7 @@ export async function listarUsuarios(
     if (filtros.idRol) query = query.eq('id_rol', filtros.idRol)
 
     const { data, error } = await query.order('nombre_completo', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const filas = (data ?? []) as unknown as FilaUsuarioCruda[]
     const usuarios: UsuarioLista[] = filas.map((f) => ({
@@ -108,7 +109,7 @@ export async function listarRolesParaSelector(): Promise<RespuestaLista<RolOpcio
         .select('id, nombre')
         .order('nivel_jerarquico', { ascending: true })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: (data ?? []) as RolOpcion[] }
 }
 
@@ -256,7 +257,7 @@ export async function cambiarPasswordUsuario(
     })
 
     if (error) {
-        return { success: false, error: error.message || 'No se pudo cambiar la contraseña.' }
+        return { success: false, error: describirError(error) || 'No se pudo cambiar la contraseña.' }
     }
     return { success: true }
 }

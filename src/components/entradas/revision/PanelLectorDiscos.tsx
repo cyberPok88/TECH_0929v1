@@ -51,7 +51,8 @@ import { toast } from 'sonner'
 import { Check, Info, Loader2, LogOut, ScanSearch, TriangleAlert, X } from 'lucide-react'
 
 import { ModalFormateo } from '@/components/entradas/revision/ModalFormateo'
-import { useAyuda } from '@/components/ui/Ayuda'
+import { textoAyuda, useAyuda } from '@/components/ui/Ayuda'
+import { useAuth } from '@/lib/stores/auth-store'
 import { Button } from '@/components/ui/button'
 import { ConfirmarAccionDialog } from '@/components/ui/ConfirmarAccionDialog'
 import { Pildora } from '@/components/data-table'
@@ -59,6 +60,9 @@ import { cn } from '@/lib/utils'
 import {
     EXPULSION_INACTIVA,
     FORMATEO_INACTIVO,
+    VERSION_MINIMA_AGENTE,
+    contextoDeRespuesta,
+    desvioDeCapacidad,
     expulsarDock,
     iniciarFormateo,
     leerDiscos,
@@ -96,6 +100,14 @@ export interface EstadoPanel {
     expulsando: boolean
     /** Discos leídos que todavía NO entraron a la ronda: se pierden si se sale. */
     sinRegistrar: number
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **la marca que muestran los discos leídos**, si es UNA.
+     * Existe para que el wizard pueda cargar las **píldoras de la LÍNEA** de esa marca: el catálogo
+     * de líneas es **por marca** (las de WD no aplican a Seagate) y el wizard no ve los discos.
+     * `null` = sin discos, o con marcas distintas (ahí no se ofrecen líneas: se registra por tandas
+     * de una misma línea, que es como el técnico trabaja).
+     */
+    marcaComun: string | null
 }
 
 /** Lo que el panel entrega al registrar la ronda. */
@@ -105,6 +117,22 @@ export interface ItemRonda {
     /** El motivo del RECHAZO A MANO, si el técnico lo puso. */
     motivoRechazoId?: string
     motivoRechazoNombre?: string
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **LA DECISIÓN del técnico**: esta pieza **crea su propia partida**,
+     * porque la lectura dice que no es de la que se está revisando.
+     *
+     * Aprobado por el dueño con su condición, que es la que manda: *«si aun detectada la diferencia **no
+     * se elige hacer la partida**, esto crearía **descuadre en inventario**, ya que **mentiría**»*.
+     * ⇒ `false`/ausente = **no se decidió**, y el registro **se BLOQUEA**: con desvío solo hay dos
+     * caminos, **crear su partida** o **rechazarla**.
+     */
+    reclasificar?: boolean
+    /**
+     * ⭐ MEJORA 52 — la metadata de la RESPUESTA del agente (motor · HDSentinel · atraso ·
+     * completitud), que no vive en el disco. Viaja con el ítem para que la evidencia que se
+     * guarda sea **completa** y no se pierda el «esta salud es de hace 3 días».
+     */
+    contexto?: Record<string, unknown> | null
 }
 
 interface PanelLectorDiscosProps {
@@ -133,6 +161,16 @@ interface PanelLectorDiscosProps {
      * las dependencias de un `useMemo`.
      */
     onEstado?: (estado: EstadoPanel) => void
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **de qué es la PARTIDA que se está revisando**, para poder avisar
+     * cuando un disco **no es de lo que dice la entrada**. Los dos salen del esquema de la categoría y
+     * de lo que se declaró en Recepción (los pasa el wizard, que sí los tiene).
+     *
+     * El caso del dueño: *«pueden decir que son de 1TB pero vienen 2 de 500GB, **por eso se revisa**»*.
+     */
+    capacidadDeclarada?: string | null
+    /** Las opciones de `capacidad` del esquema — para etiquetar lo medido con el mismo idioma. */
+    opcionesCapacidad?: string[]
 }
 
 /**
@@ -160,14 +198,41 @@ export function PanelLectorDiscos({
     enRonda = 0,
     onFormateado,
     onEstado,
+    capacidadDeclarada = null,
+    opcionesCapacidad = [],
 }: PanelLectorDiscosProps) {
     const [cargando, setCargando] = useState(false)
     const [discos, setDiscos] = useState<DiscoLeido[]>([])
     const [nota, setNota] = useState<string | null>(null)
     const [leido, setLeido] = useState(false)
     const [atraso, setAtraso] = useState<number | null>(null)
+    /**
+     * ⭐ 08 Oct 2026 — LA VERSIÓN DEL AGENTE que respondió, y si es anterior a la mínima.
+     *
+     * POR QUÉ EXISTE: el `.exe` del puesto quedó viejo y **nadie se enteró** — el único
+     * síntoma era una marca vacía que el técnico completaba a mano. La app toleraba al
+     * agente viejo en silencio, así que la deriva era invisible desde los dos lados.
+     * Esto la hace visible: es una línea de aviso, no un bloqueo.
+     */
+    const [versionAgente, setVersionAgente] = useState<string | null>(null)
+    const [agenteViejo, setAgenteViejo] = useState(false)
+    /**
+     * ⭐ MEJORA 52 — la metadata de la ÚLTIMA lectura del agente (motor · HDSentinel · atraso ·
+     * completitud). Vive acá porque es de la RESPUESTA, no del disco, y se adjunta a cada ítem de
+     * la ronda para que la evidencia guardada sea completa.
+     */
+    const [contexto, setContexto] = useState<Record<string, unknown> | null>(null)
     /** clave del disco → motivo del rechazo a mano. */
     const [rechazos, setRechazos] = useState<Record<string, string>>({})
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **LA DECISIÓN del técnico sobre la pieza que no es de su partida.**
+     *
+     * Aprobado por el dueño con su condición, que es la que manda: *«si aun detectada la diferencia **no se
+     * elige hacer la partida**, esto crearía **descuadre en inventario**, ya que **mentiría**»*.
+     * ⇒ **La decisión es OBLIGATORIA**: o **crea su partida**, o se **rechaza**. No hay una tercera vía:
+     * registrarla callada dejaría un SKU de 3TB dentro de una partida de 2TB.
+     */
+    const [reclasificar, setReclasificar] = useState<Record<string, boolean>>({})
     const [formato, setFormato] = useState<ProgresoFormateo>(FORMATEO_INACTIVO)
     /**
      * ⭐ MEJORA 46 — **¿se está viendo el modal del formateo?** Lo controla este panel (el padre
@@ -197,6 +262,12 @@ export function PanelLectorDiscos({
     const ayudaExpulsarFormateo = useAyuda('revision.expulsar-con-formateo')
     const ayudaExpulsar = useAyuda('revision.expulsar-que-hace')
     /**
+     * ⭐ MEJORA 52 — las preferencias de ayuda, para el `title` **del disco que se está mirando**:
+     * el texto lleva los números de ESA pieza, así que no puede resolverse una sola vez arriba.
+     * Es la **tercera forma** de `Ayuda` (`textoAyuda`), que existe exactamente para esto.
+     */
+    const ayudas = useAuth((s) => s.usuario?.preferencias?.ayudas)
+    /**
      * ⭐ MEJORA 45 — **QUÉ se va a formatear y con qué confirmación.** Antes había un solo
      * `confirmarFormato: boolean` y el diálogo mandaba SIEMPRE todos los NS: desapareció el
      * caso «un disco bueno y uno malo», donde el técnico necesita formatear SOLO el bueno.
@@ -216,6 +287,44 @@ export function PanelLectorDiscos({
     const [transcurrido, setTranscurrido] = useState(0)
     const reloj = useRef<number | null>(null)
     const relojExpulsion = useRef<number | null>(null)
+
+    /**
+     * ⭐ FIX 09 Oct 2026 (lo pidió el dueño en su VF) — **DEJAR LA PANTALLA LISTA PARA RELEER.**
+     *
+     * *«el botón expulsar dock que borre la pantalla lista para releer, o igual el botón de registrar
+     * que mande releer»*. Las DOS acciones cierran un turno de lectura —expulsar apaga el puente;
+     * registrar mete los discos en la ronda— y en los dos casos **las fichas que quedan en pantalla ya
+     * no sirven**: son de discos que se van, o de discos que ya están en la ronda. Antes se quedaban
+     * ahí y el técnico tenía que apretar `Re-leer los discos` con la pantalla llena de discos viejos,
+     * que es exactamente lo que se lee como «no pasó nada».
+     *
+     * ⚠️ Una lectura NO es solo `discos`: si se limpiara la lista y `leido` siguiera en `true`, el
+     * bloque grande de lectura **no volvería** (la pantalla quedaría vacía, sin el botón con el que se
+     * relee). Y si sobrevivieran `registradas`/`rechazos`/`reclasificar` de la lectura anterior, **la
+     * tanda siguiente nacería con discos ya marcados** — que es la forma silenciosa de perder una
+     * pieza. Por eso se reinicia TODO lo que produce una lectura, incluidos el atraso y la versión del
+     * agente (son de ESA respuesta, no del panel).
+     *
+     * 🔴 NO se llama con un formateo corriendo: las dos puertas que la invocan ya están inhabilitadas
+     * con `formateando` (la regla dura de la MEJORA 45) y `formato` se reinicia recién cuando el disco
+     * que se estaba borrando ya no está en el dock.
+     */
+    const limpiarLectura = useCallback(() => {
+        setDiscos([])
+        setLeido(false)
+        setNota(null)
+        setRegistradas([])
+        setRechazos({})
+        setReclasificar({})
+        setAtraso(null)
+        setContexto(null)
+        setVersionAgente(null)
+        setAgenteViejo(false)
+        setFormato(FORMATEO_INACTIVO)
+        setExclusion(EXPULSION_INACTIVA)
+        setFallos(0)
+        setTranscurrido(0)
+    }, [])
 
     /**
      * ⚠️ El sondeo del progreso vive en un `useEffect` que se apaga solo. `setState`
@@ -309,6 +418,9 @@ export function PanelLectorDiscos({
         setNota(null)
         setRegistradas([])
         setAtraso(null)
+        setContexto(null)
+        setVersionAgente(null)
+        setAgenteViejo(false)
         if (opts?.formateo) setFormato(FORMATEO_INACTIVO)
         // ② ANIMACIÓN — el panel de lectura se pinta porque `leido` es `false` y `discos` vacío.
         setCargando(true)
@@ -316,6 +428,11 @@ export function PanelLectorDiscos({
             const r = await leerDiscos()
             setDiscos(r.discos)
             setAtraso(r.hdsentinel_atraso_segundos)
+            // ⭐ 08 Oct 2026 — la versión: si el lector de esta PC quedó viejo, se dice.
+            setVersionAgente(r.version_agente)
+            setAgenteViejo(r.agente_version_anterior)
+            // ⭐ MEJORA 52 — la metadata de la respuesta, para la evidencia del guardado.
+            setContexto(contextoDeRespuesta(r))
             // ③ RESULTADOS — `leido` en `true` retira el panel de lectura y muestra las fichas.
             setLeido(true)
             if (!r.agente) {
@@ -377,9 +494,12 @@ export function PanelLectorDiscos({
                         veredicto,
                         motivoRechazoId: motivoId,
                         motivoRechazoNombre: motivos.find((m) => m.id === motivoId)?.nombre,
+                        contexto,
+                        /* ⭐ MEJORA 52 — la decisión viaja con la pieza hasta el guardado. */
+                        reclasificar: reclasificar[k] === true,
                     }
                 }),
-        [discos, rechazos, motivos, atraso, clave]
+        [discos, rechazos, reclasificar, motivos, atraso, contexto, clave]
     )
 
     /**
@@ -389,9 +509,17 @@ export function PanelLectorDiscos({
      */
     const sinRegistrar = discos.filter((d, i) => !registradas.includes(clave(d, i))).length
     const formateando = formato.estado === 'corriendo'
+    /**
+     * ⭐ MEJORA 52 — la marca COMÚN de los discos leídos (para las píldoras de la LÍNEA).
+     * Si los discos no comparten marca, `null`: no se ofrecen líneas a medias.
+     */
+    const marcaComun = useMemo(() => {
+        const marcas = [...new Set(discos.map((d) => (d.marca ?? '').trim()).filter(Boolean))]
+        return marcas.length === 1 ? marcas[0] : null
+    }, [discos])
     const estadoPanel = useMemo<EstadoPanel>(
-        () => ({ formateando, expulsando, sinRegistrar }),
-        [formateando, expulsando, sinRegistrar]
+        () => ({ formateando, expulsando, sinRegistrar, marcaComun }),
+        [formateando, expulsando, sinRegistrar, marcaComun]
     )
     useEffect(() => {
         onEstado?.(estadoPanel)
@@ -401,6 +529,13 @@ export function PanelLectorDiscos({
      * ⭐ MEJORA 45 — LA EXPULSIÓN. La regla dura: **con un formateo activo NO se expulsa**.
      * Se niega en los dos lados (el botón deshabilitado acá y el 409 del agente), porque
      * expulsar el puente en medio de un `diskpart clean` deja el disco a medio limpiar.
+     *
+     * ⭐ FIX 09 Oct 2026 — **y cuando la expulsión TERMINA, la pantalla se limpia** (`limpiarLectura`):
+     * los discos que se veían ya no están conectados, así que dejar sus fichas es mostrar mercancía que
+     * el dock ya soltó. El panel vuelve a su estado de lectura y el técnico aprieta `Leer discos`
+     * cuando enchufe el dock con los otros discos. ⚠️ **Solo con `terminado`**: si Windows la rechazó
+     * (`error`), los discos SIGUEN montados y su lectura sigue siendo válida — limpiar ahí perdería la
+     * evidencia de una tanda que todavía se puede registrar.
      */
     useEffect(() => {
         if (!expulsando) return
@@ -415,6 +550,7 @@ export function PanelLectorDiscos({
                     setExpulsando(false)
                     if (e.estado === 'terminado') {
                         toast.success('Dock expulsado. Ya podés desconectarlo y poner los otros discos.')
+                        limpiarLectura()
                     } else {
                         toast.error(e.aviso ?? 'No se pudo expulsar el dock.')
                     }
@@ -426,7 +562,7 @@ export function PanelLectorDiscos({
             if (relojExpulsion.current) window.clearInterval(relojExpulsion.current)
             relojExpulsion.current = null
         }
-    }, [expulsando])
+    }, [expulsando, limpiarLectura])
 
     if (!aplica) return null
 
@@ -530,17 +666,53 @@ export function PanelLectorDiscos({
             toast.warning('Esos discos ya están en la ronda.')
             return
         }
+        /**
+         * ⭐ MEJORA 52 — **EL CANDADO DE LA DECISIÓN.** Condición del dueño: *«si aun detectada la
+         * diferencia no se elige hacer la partida, esto crearía **descuadre en inventario**, ya que
+         * **mentiría**»*. ⇒ Un disco con desvío **no se registra** sin decidir: **crea su partida** o
+         * **se rechaza**. Registrarlo callado dejaría un SKU de 3TB dentro de una partida de 2TB.
+         */
+        const sinDecidir = items.filter(
+            (it) =>
+                it.veredicto !== 'DEVOLUCION' &&
+                !it.reclasificar &&
+                desvioDeCapacidad(it.disco.capacidad_texto, capacidadDeclarada, opcionesCapacidad) !== null
+        )
+        if (sinDecidir.length > 0) {
+            toast.error(
+                sinDecidir.length === 1
+                    ? 'Ese disco tiene capacidad DIFERENTE a lo que dice la entrada: elegí «Crear partida» o rechazalo con su motivo. No corregirlo causa descuadres al inventario.'
+                    : `${sinDecidir.length} discos tienen capacidad DIFERENTE a lo que dice la entrada: elegí «Crear partida» o rechazalos con su motivo. No corregirlo causa descuadres al inventario.`
+            )
+            return
+        }
         items.forEach((it) => onElegir(it.disco, it.motivoRechazoId))
         onRegistrar(items)
-        setRegistradas((prev) => {
-            const nuevas = discos
-                .map((d, i) => clave(d, i))
-                .filter((k) => (claves === null || claves.includes(k)) && !prev.includes(k))
-            return [...prev, ...nuevas]
+        /**
+         * ⭐ FIX 09 Oct 2026 (lo pidió el dueño) — **con TODOS los discos en la ronda, la pantalla se
+         * limpia y queda lista para releer.**
+         *
+         * ⚠️ Recién cuando **no queda ninguno sin registrar**, y la razón es el caso de la MEJORA 45
+         * —un disco bueno y uno malo en el dock—: registrar el malo desde SU tarjeta no puede borrar la
+         * ficha del bueno, que todavía tiene que poder entrar a la ronda. Mientras quede uno, la
+         * pantalla se queda como está (es el estado que el botón de esa tarjeta necesita).
+         * Con todos registrados no hay nada más que hacer con esta tanda: se sacan los discos, se
+         * ponen los siguientes y se lee. Antes había que apretar `Re-leer los discos` con las fichas
+         * viejas todavía en pantalla.
+         */
+        const enRondaAhora = new Set(registradas)
+        discos.forEach((d, i) => {
+            const k = clave(d, i)
+            if (claves === null || claves.includes(k)) enRondaAhora.add(k)
         })
+        setRegistradas([...enRondaAhora])
+        const sinRegistrarAhora = discos.filter((d, i) => !enRondaAhora.has(clave(d, i))).length
         toast.success(
-            `Ronda: ${items.length} disco(s) registrados. Se escriben al guardar el avance.`
+            sinRegistrarAhora === 0
+                ? `Ronda: ${items.length} disco(s) registrados. Sacá estos discos y leé los siguientes.`
+                : `Ronda: ${items.length} disco(s) registrados. Se escriben al guardar el avance.`
         )
+        if (sinRegistrarAhora === 0) limpiarLectura()
     }
 
     return (
@@ -615,17 +787,27 @@ export function PanelLectorDiscos({
                 </div>
             ) : null}
 
-            {/* ⚠️ AGENTE VIEJO — el aval se pudo INFERIR pero el agente no lo manda: se dice,
-                en vez de dejar al técnico creyendo que el puesto está al día. Es informativo:
-                la lectura y el formateo siguen funcionando. */}
-            {discos.some((d) => d.agente_desactualizado) ? (
+            {/* ⚠️ EL LECTOR DE ESTA PC ES VIEJO — 08 Oct 2026.
+                Antes había DOS motivos distintos para decir esto y cada uno tenía su caja:
+                (a) el agente no manda `apto_para_decidir` (el aval se infiere), y ahora
+                (b) el agente no manda `version` o manda una anterior a VERSION_MINIMA_AGENTE.
+                Un agente viejo suele disparar los dos ⇒ dos cajas diciendo lo mismo. Es UNA
+                sola caja, y el texto dice QUÉ le falta según lo que sí se sabe.
+                ⚠️ Es INFORMATIVO: la lectura, el formateo y la expulsión siguen funcionando. */}
+            {agenteViejo || discos.some((d) => d.agente_desactualizado) ? (
                 <p className="flex items-start gap-2 rounded-md border border-info/40 bg-info/10 px-3 py-2 text-[12.5px]">
                     <Info className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden="true" />
                     <span>
-                        <b>El lector de esta PC está en una versión anterior.</b> No informa de dónde salió
-                        cada salud, así que la app la deduce de la fuente del número: los discos leídos por
-                        HDSentinel o por el propio disco deciden igual. Para que el aval venga del lector,
-                        reiniciá el agente (cerrá su ventana y volvé a abrirlo como administrador).
+                        <b>El lector de discos de esta PC está en una versión anterior.</b>{' '}
+                        {versionAgente
+                            ? <>Informa la versión <b>{versionAgente}</b>.</>
+                            : <>No informa su versión (es anterior a la {VERSION_MINIMA_AGENTE}).</>}{' '}
+                        {discos.some((d) => d.agente_desactualizado)
+                            ? 'Tampoco dice de dónde salió cada salud, así que la app la deduce de la fuente del número: los discos leídos por HDSentinel o por el propio disco deciden igual.'
+                            : ''}{' '}
+                        Lo que <b>sí</b> cambia y no se ve: puede estar usando reglas de marca viejas
+                        (una marca sale vacía aunque el disco se haya leído perfecto). Actualizalo
+                        compilando e instalando el lector en esa PC.
                     </span>
                 </p>
             ) : null}
@@ -759,6 +941,77 @@ export function PanelLectorDiscos({
                                             tono={ev.conAval ? 'neutro' : 'advertencia'}
                                         />
                                     </div>
+
+                                    {/* ⭐ MEJORA 52 — **¿ESTE DISCO ES DE LO QUE DICE LA ENTRADA?**
+                                        Va pegado a la salud, arriba y **EN ROJO**, porque es lo que el
+                                        técnico tiene que ver **AL LEER** — antes de registrar, que es
+                                        cuando puede decidir. Su caso: declaró 1TB y el lector midió
+                                        2000.3 GB ⇒ **la pieza no es de esa partida**.
+
+                                        ⚠️ **Se compara contra lo declarado en la PARTIDA**, nunca
+                                        contra lo que se va capturando: si no, al registrar el aviso
+                                        desaparecía (el estado de la ronda se sobreescribe con lo que
+                                        dijo el disco). Cazado por el dueño el 07 Oct.
+
+                                        Y dice **qué va a pasar**: la pieza se irá a la partida de su
+                                        capacidad (reclasificación) y **la nota tendrá que ajustarse**.
+                                        No corrige nada: la huella ya la corrige el disco. AVISA. */}
+                                    {(() => {
+                                        const desvio = desvioDeCapacidad(
+                                            d.capacidad_texto,
+                                            capacidadDeclarada,
+                                            opcionesCapacidad
+                                        )
+                                        if (!desvio) return null
+                                        return (
+                                            /* ⭐ MEJORA 52 — **DOS LÍNEAS, como lo pidió el dueño**
+                                               (*«si me agrada el mensaje solo que dice mucho»*):
+                                               el rótulo + el botón, y la consecuencia. **El porqué
+                                               completo vive en el `title` del botón** (el patrón de la
+                                               casa: `Ayuda`, tercera forma — y con los números de ESA
+                                               pieza). En rojo, porque es una discrepancia con el
+                                               proveedor y se decide acá, al leer. */
+                                            <div className="mx-3.5 mb-2.5 rounded-md border border-destructive/50 bg-destructive/10 px-2.5 py-2 text-[12.5px] text-destructive">
+                                                <span className="flex flex-wrap items-center gap-2">
+                                                    <TriangleAlert
+                                                        className="h-4 w-4 shrink-0"
+                                                        aria-hidden="true"
+                                                    />
+                                                    <b>Capacidad DIFERENTE</b>
+                                                    <button
+                                                        type="button"
+                                                        aria-pressed={reclasificar[k] === true}
+                                                        title={textoAyuda(
+                                                            'revision.capacidad-diferente',
+                                                            ayudas,
+                                                            {
+                                                                declarada: desvio.declarada,
+                                                                medida: desvio.medida,
+                                                            }
+                                                        )}
+                                                        onClick={() =>
+                                                            setReclasificar((prev) => ({
+                                                                ...prev,
+                                                                [k]: !prev[k],
+                                                            }))
+                                                        }
+                                                        className={`rounded-md border px-2.5 py-1 text-[12px] font-semibold transition ${
+                                                            reclasificar[k] === true
+                                                                ? 'border-destructive bg-destructive text-destructive-foreground'
+                                                                : 'border-destructive/60 text-destructive hover:bg-destructive/10'
+                                                        }`}
+                                                    >
+                                                        {reclasificar[k] === true
+                                                            ? '✓ Crear partida'
+                                                            : 'Crear partida'}
+                                                    </button>
+                                                </span>
+                                                <span className="mt-1 block">
+                                                    ⚠️ No corregir esto causa descuadres al inventario.
+                                                </span>
+                                            </div>
+                                        )
+                                    })()}
 
                                     {ev.nota ? (
                                         <p

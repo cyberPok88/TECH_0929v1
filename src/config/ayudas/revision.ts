@@ -58,6 +58,15 @@ export const AYUDAS_REVISION: RegistroAyudas = {
         donde: 'PanelLectorDiscos · barra de acciones · botón expulsar (title)',
         texto: 'No se puede expulsar con un formateo en curso.',
     },
+    // ── ⭐ MEJORA 52 (07 Oct 2026) — la pieza que NO es de lo que dice la entrada ──────────
+    // El aviso en pantalla es de DOS LÍNEAS (decisión del dueño: *«si me agrada el mensaje solo
+    // que dice mucho»*): el rótulo, el botón, y la consecuencia. **El porqué vive acá**, en el
+    // `title` del botón — es el patrón de la casa (MEJORA 47, tercera forma de `Ayuda`).
+    'revision.capacidad-diferente': {
+        tipo: 'aviso',
+        donde: 'PanelLectorDiscos · ficha del disco · botón «Crear partida» (title)',
+        texto: 'Este disco NO es de lo que dice la entrada: la partida declara {declarada} y el disco mide {medida}. «Crear partida» manda la pieza a la partida de {medida} (reclasificación) y RECEPCIÓN valida el ajuste al cerrar la revisión; la nota original no se modifica. Si no se corrige, el inventario queda descuadrado: el SKU diría {medida} dentro de una partida de {declarada}. La otra salida es rechazarla con su motivo.',
+    },
     // ── El modal del formateo ─────────────────────────────────────────────────
     'revision.formateo-por-que-relee': {
         tipo: 'aviso',
@@ -99,5 +108,149 @@ export const AYUDAS_REVISION: RegistroAyudas = {
         fijo: true,
         donde: 'WizardRevision · confirmación de «salir» · detalle',
         texto: 'Si salís sin guardar el avance, esas piezas se pierden. Los discos leídos quedan sin registrar y el formateo, si está corriendo, sigue sin que nadie lo mire.',
+    },
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ⭐ EL DESGLOSE DE REVISIÓN EN UN MODAL (Fase 2 · 06 Oct 2026 · mockup aprobado
+    //    `DOCS/design/entradas/02-revision/01-detalle-revision.html`)
+    //
+    // El chevron de la cola ya no despliega la fila: abre `AvanceRevisionModal` con el MISMO
+    // desglose (`PartidasAvance`, que gana `enModal`). Y sus `title` —que eran LITERALES inline
+    // (medido: `PartidasAvance.tsx:361, 367, 372, 378, 391, 397, 403, 476, 506, 630, 648, 655,
+    // 717, 734, 785`)— pasan al registro: **hasta hoy la explicación de esta superficie no se
+    // podía apagar**.
+    //
+    // ⚠️ Acá SÓLO hay `nota`: es una superficie de sólo lectura —no captura nada y no hay nada
+    // irreversible— ⇒ no hay `aviso` ni `candado`.
+    // ⚠️ NO se cataloga, a propósito (clasificador del estándar · skill `ayudas-pantalla` §1.2):
+    //    · la **frase de avance** de Z1 («1 pieza aprobada sin liberar en 2 productos»): es **DATO**
+    //      — el interruptor apaga explicaciones, jamás el estado;
+    //    · el **porqué de cada control apagado** (`motivoRevisar` · `motivoLiberar` · `motivoVer` y
+    //      el «Esta vista es de solo lectura.»): es **BANDERA** — vaciarla dejaría el botón mudo,
+    //      que es justo lo que la SPEC §2.3 prohíbe. Vive **inline** en `PartidasAvance`;
+    //    · el `title` de la celda «#» cuando la línea NO viene de una partida múltiple
+    //      («Partida 3») y el del caso de sólo lectura de la DEV («2 piezas devueltas de X…»):
+    //      **nombran el dato**, no lo explican;
+    //    · la etiqueta de un control · el **nombre accesible del chevron** · el `sr-only` «Acciones».
+    //
+    // ⚠️ Las claves de `recepcion.ts` **no se renombran ni se mueven**: los dos desgloses dicen
+    //    cosas PARECIDAS pero NO idénticas del mismo encabezado (el «DEV» de Recepción explica otra
+    //    tabla que el de Revisión). Es deliberado; unificarlas es una decisión aparte.
+    //
+    // ⚠️ Los `{marcadores}` se pasan al consumir la ayuda (`useAyuda` en un `title` fijo,
+    //    `textoAyuda` cuando el texto depende de la FILA que se está pintando).
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Z2 · los encabezados — qué mide cada columna
+    'revision.detalle-th-numero': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, encabezado «#»',
+        texto: 'En la fila de PARTIDA, el número de la partida declarada; en las de producto, el consecutivo del producto en la entrada.',
+    },
+    'revision.detalle-th-producto': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, encabezado «Producto»',
+        texto: 'En la fila de PARTIDA, lo declarado en recepción. En las de producto, la huella (marca + atributos) que produjo la REVISIÓN.',
+    },
+    'revision.detalle-th-recib': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, encabezado «Recib.»',
+        texto: 'Piezas DE ESTE PRODUCTO: aprobadas + devueltas. En una partida sin revisar, lo declarado en recepción.',
+    },
+    'revision.detalle-th-revisadas': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, encabezado «Revisadas»',
+        texto: 'Aprobadas + devueltas de ESTE producto, sobre las piezas de esta línea',
+    },
+    'revision.detalle-th-aprob': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, encabezado «Aprob.»',
+        texto: 'Piezas aprobadas de este producto (se pagarán)',
+    },
+    'revision.detalle-th-dev': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, encabezado «DEV»',
+        texto: 'Piezas rechazadas de este producto — abre la devolución',
+    },
+    'revision.detalle-th-faltan': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, encabezado «Faltan»',
+        texto: 'Piezas que faltan por revisar en la PARTIDA: nadie las revisó, así que todavía no tienen huella y no se reparten por línea.',
+    },
+    'revision.detalle-th-estado': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, encabezado «Estado»',
+        texto: 'Estado de la PARTIDA en la etapa (sus líneas lo comparten: es el mismo hecho)',
+    },
+
+    // Z2 · las celdas que EXPLICAN de dónde sale el dato
+    'revision.detalle-celda-producto-padre': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, celda «Producto» de la fila de PARTIDA',
+        texto: 'Lo que Recepción declaró (categoría + atributos de recepción). Debajo, lo que la revisión encontró.',
+    },
+    'revision.detalle-celda-producto-hijo': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, celda «Producto» de la fila de PRODUCTO',
+        texto: 'Declarado en recepción: {huella}',
+    },
+    'revision.detalle-celda-linea': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, celda «#» de una línea que viene de una partida múltiple',
+        texto: 'Línea {n} de la entrada · viene de la partida {partida} declarada',
+    },
+
+    // Z1 · la toolbar de avance (las 4 puertas), con el título del control ENCENDIDO
+    'revision.detalle-revisar': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z1, «Revisar (n)»',
+        texto: 'Abre la revisión en la partida #{partida}, que es la que tiene piezas pendientes.',
+    },
+    'revision.detalle-liberar-todo': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z1, «Liberar todo (n)»',
+        texto: 'Abre la liberación con TODOS los productos de la entrada ya cargados ({n} pieza(s) aprobadas).',
+    },
+    'revision.detalle-ver': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z1, «Ver revisión completa»',
+        texto: 'El resultado de la revisión de toda la entrada.',
+    },
+    'revision.detalle-imprimir': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z1, «Imprimir revisión»',
+        texto: 'Acta de revisión para firmar: partidas, productos, aprobadas y DEV.',
+    },
+
+    // Z2 · las acciones de las filas de PARTIDA y de PRODUCTO
+    'revision.detalle-revisar-partida': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, fila de PARTIDA, «Revisar (n)»',
+        texto: 'Abrir la revisión de la partida #{partida}: {n} pieza(s) por revisar.',
+    },
+    'revision.detalle-liberar-partida': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, fila de PARTIDA, «Liberar n»',
+        texto: '{n} pieza(s) aprobadas de la partida #{partida} (todos sus productos) pueden pasar ya a limpieza.',
+    },
+    'revision.detalle-liberar-producto': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, fila de PRODUCTO, «Liberar n»',
+        texto: '{n} pieza(s) aprobadas de ESTE producto pueden pasar ya a limpieza, sin esperar al resto de la partida.',
+    },
+    /**
+     * ⚠️ La DEV se cuenta y puede ser UNA o VARIAS (`1 mala` / `2 malas`): el `{objeto}` entra ya
+     * conjugado («la devolución» · «las 2 devoluciones») porque el registro guarda el texto
+     * LITERAL del componente y el singular/plural es parte de él. Son DOS claves y no una porque
+     * son dos frases distintas: la de la partida no dice la marca, la del producto sí.
+     */
+    'revision.detalle-ver-dev': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, píldora DEV de la fila de PRODUCTO',
+        texto: 'Ver {objeto} de {marca} en la partida #{partida}.',
+    },
+    'revision.detalle-ver-dev-partida': {
+        tipo: 'nota',
+        donde: 'PartidasAvance · Z2, píldora DEV de la fila de PARTIDA',
+        texto: 'Ver {objeto} de la partida #{partida}.',
     },
 }

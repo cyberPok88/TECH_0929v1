@@ -14,6 +14,7 @@ import type { ColumnDefExtension, EstadoTabla } from '@/components/data-table'
 import { usePageConfig } from '@/hooks/usePageConfig'
 import { useCanAction } from '@/hooks/useCanAction'
 import { listarDivergencias } from '@/lib/actions/entradas'
+import { useContadorEtapa } from '@/lib/stores/avisos-entradas-store'
 import type { Divergencia } from '@/types/entradas'
 import { DivergenciaModal } from '@/components/entradas/DivergenciaModal'
 
@@ -25,6 +26,11 @@ export function DivergenciasCatalogo() {
     const [seleccion, setSeleccion] = useState<Divergencia | null>(null)
 
     const puedeAprobar = useCanAction(RUTA, 'aprobar')
+
+    // ⭐ MEJORA 53 (09 Oct 2026) — un documento que cae en `bloqueada_por_divergencia` tiene que
+    // aparecer acá sin pedirle a nadie que recargue (era una de las notificaciones que
+    // `FLUJO_01 §9.2` tenía declaradas como pendientes). El contador lo publica `AvisosEntradas`.
+    const avisoDivergencias = useContadorEtapa('divergencias')
 
     useEffect(() => {
         let activo = true
@@ -40,7 +46,7 @@ export function DivergenciasCatalogo() {
         return () => {
             activo = false
         }
-    }, [])
+    }, [avisoDivergencias])
 
     const recargar = useCallback(async () => {
         setEstadoTabla('loading')

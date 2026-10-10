@@ -17,14 +17,19 @@
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowLeft, PackagePlus } from 'lucide-react'
+import { ArrowLeft, PackagePlus, Pencil } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { Ayuda, useAyuda } from '@/components/ui/Ayuda'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { abrirCotejoAlta, abrirCotejoBandeja, confirmarAlta, confirmarAltaBandeja } from '@/lib/actions/entradas'
+import { listarCategorias } from '@/lib/actions/catalogos'
 import { SelectorSkuHuella } from '@/components/entradas/alta/SelectorSkuHuella'
+import { ProductoModal } from '@/components/catalogos/productos/ProductoModal'
+import { nombreDesdeHuella, claveLinea } from '@/types/entradas'
+import type { CategoriaFila } from '@/types/catalogos'
 import type { BandejaLiberada, CotejoLinea, Entrada } from '@/types/entradas'
 
 interface CotejoAltaModalProps {
@@ -40,12 +45,90 @@ interface CotejoAltaModalProps {
 const aTexto = (at: Record<string, unknown> | null | undefined): Record<string, string> =>
     Object.fromEntries(Object.entries(at ?? {}).map(([k, v]) => [k, String(v ?? '')]))
 
+/**
+ * ⭐ FIX 08 Oct 2026 (lo pidió la VF del dueño: *«se supone que las 2 son el mismo producto, pero no lo
+ * detectó»*) — **las HUELLAS que aparecen más de una vez en este cotejo**.
+ *
+ * Dos partidas de la misma entrada pueden rendir **el mismo producto** (dos lotes del mismo disco).
+ * Son **dos líneas** —porque son dos partidas y dos tandas— pero **un solo SKU**: el cotejo tiene que
+ * decirlo, o el almacenista cree que está creando dos productos cuando en realidad está resolviendo
+ * el mismo dos veces. La clave es la de siempre (`claveLinea`: marca + huella canónica), la MISMA con
+ * la que el desglose y la nota emparejan líneas.
+ */
+function huellasRepetidas(filas: CotejoLinea[]): Set<string> {
+    const cuenta = new Map<string, number>()
+    for (const l of filas) {
+        const k = claveLinea(l.id_marca, l.atributos)
+        cuenta.set(k, (cuenta.get(k) ?? 0) + 1)
+    }
+    return new Set([...cuenta.entries()].filter(([, n]) => n > 1).map(([k]) => k))
+}
+
 export function CotejoAltaModal({ open, onOpenChange, entrada, bandeja, onGuardado }: CotejoAltaModalProps) {
     // `null` = todavía no llegó: el loader se DERIVA de ahí (no se escribe estado en el efecto).
     const [lineas, setLineas] = useState<CotejoLinea[] | null>(null)
     const [cantidades, setCantidades] = useState<Record<string, string>>({})
+    /**
+     * ⭐ 08 Oct 2026 (lo pidió el dueño) — **la cantidad FÍSICA no se edita por accidente.**
+     *
+     * *«En ese modal la cantidad está bien que se pueda editar, pero poné un botón que diga Editar y
+     * poder editar el campo, con advertencia de si edita la cantidad pasa tal cosa.»*
+     *
+     * El campo nace **de sólo lectura con la cantidad PENDIENTE** (el 99 % de los cotejos van bien y
+     * no hay nada que corregir), y el `<Input>` se abre con el botón **Editar** — que además pinta el
+     * `candado` (`alta.cantidad-fisica`: catálogo de ayudas, apagable por el usuario) porque lo que se
+     * escribe va a `lotes` + `movimientos_inventario`, que son **append-only**. Y trae la vuelta
+     * atrás («Usar la pendiente»): probar un número no obliga a dejar la línea cambiada.
+     */
+    const [editando, setEditando] = useState<Record<string, boolean>>({})
+    /** El PORQUÉ del aviso de la cantidad, para el `title` (el texto largo no se pinta inline). */
+    const porqueCantidad = useAyuda('alta.cantidad-fisica-porque')
     const [skuSel, setSkuSel] = useState<Record<string, string>>({})
     const [cargando, setCargando] = useState(false)
+
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — **EL ALTA ABRE EL FORMULARIO DE PRODUCTO** (lo pidió el dueño:
+     * *«el alta sí abrir el formulario como dices»*). Guarda la LÍNEA para la que se está dando de
+     * alta: al guardar hay que **dejar su SKU seleccionado** y seguir con el cotejo, sin volver a
+     * buscar lo que el almacenista acaba de crear.
+     *
+     * Las categorías se piden **solo al abrir** el formulario (no en cada apertura del cotejo): son
+     * datos del hub de Catálogos y el puesto de Almacén no los necesita para nada más.
+     */
+    const [formulario, setFormulario] = useState<{ linea: CotejoLinea } | null>(null)
+    const [categorias, setCategorias] = useState<CategoriaFila[]>([])
+    const [cargandoCategorias, setCargandoCategorias] = useState(false)
+
+    /**
+     * ⭐ FIX 08 Oct 2026 (lo pidió el dueño para su prueba: *«haz algunos que se repitan la huella para
+     * ver las detecta»*) — **cuando nace un SKU, las DEMÁS líneas vuelven a preguntar.**
+     *
+     * El caso: una entrada con **dos partidas que rinden la MISMA huella** (dos lotes del mismo
+     * producto). Los dos selectores buscan **a la vez**, cuando el producto todavía no existe ⇒ los
+     * dos dicen «Sin coincidencias»; el almacenista lo crea en la primera línea… y **la segunda se
+     * queda con la lista vieja** y vuelve a pedir «Crear producto» para el mismo producto. Con el
+     * `23505` ya no duplica (reutiliza), pero el puesto igual da un paso de más y **no ve** que el
+     * sistema lo detectó.
+     *
+     * ⇒ Un contador de generación que se incrementa al crear/reutilizar: viaja en el `key` de cada
+     * selector y los remonta, y al montar **vuelven a buscar**. Es barato (una consulta por línea) y
+     * no pierde nada: el estado de cada selector es derivado.
+     */
+    const [generacionSku, setGeneracionSku] = useState(0)
+
+    const abrirFormulario = async (linea: CotejoLinea) => {
+        setFormulario({ linea })
+        if (categorias.length > 0) return
+        setCargandoCategorias(true)
+        const r = await listarCategorias()
+        setCargandoCategorias(false)
+        if (!r.success) {
+            toast.error('No se pudieron cargar las categorías del hub.')
+            setFormulario(null)
+            return
+        }
+        setCategorias(r.data ?? [])
+    }
 
     useEffect(() => {
         if (!open) return
@@ -85,6 +168,8 @@ export function CotejoAltaModal({ open, onOpenChange, entrada, bandeja, onGuarda
     )
     /** Sin saldo por cotejar: la acción es CERRAR (todo salió por tandas), no ingresar. */
     const soloCerrar = filas.length > 0 && pendienteTotal === 0
+    /** ⭐ Las huellas que se repiten en este cotejo (dos partidas = un solo producto). */
+    const mismasHuellas = huellasRepetidas(filas)
 
     const confirmar = async () => {
         const conCantidad = filas.filter((l) => Number(cantidades[l.id_partida_resuelta] ?? 0) > 0)
@@ -142,7 +227,8 @@ export function CotejoAltaModal({ open, onOpenChange, entrada, bandeja, onGuarda
         : `Cotejo e ingreso — ${entrada?.folio ?? ''}`
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <>
+            <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
                 <DialogHeader className="flex-row items-center gap-3">
                     <Button
@@ -196,6 +282,15 @@ export function CotejoAltaModal({ open, onOpenChange, entrada, bandeja, onGuarda
                                             <b className="text-foreground">{l.cantidad_pendiente}</b>
                                             {sinSaldo && <span className="text-chart-4"> · ya en almacén</span>}
                                         </div>
+                                        {/* ⭐ FIX 08 Oct 2026 — el aviso que faltaba: esta línea y otra
+                                            del MISMO cotejo comparten huella ⇒ es UN solo producto. */}
+                                        {mismasHuellas.has(claveLinea(l.id_marca, l.atributos)) && (
+                                            <p className="rounded-md border border-chart-4/40 bg-chart-4/10 px-2.5 py-1.5 text-[12px]">
+                                                Mismo producto que <b>otra línea</b> de esta entrada
+                                                (comparten huella): resolvé <b>un solo SKU</b> — la otra
+                                                línea lo va a tomar sola.
+                                            </p>
+                                        )}
                                         {!sinSaldo && (
                                             <div className="flex items-end gap-2">
                                                 <div className="min-w-0 flex-1 space-y-1">
@@ -203,6 +298,7 @@ export function CotejoAltaModal({ open, onOpenChange, entrada, bandeja, onGuarda
                                                         SKU (lo resuelve Almacén)
                                                     </span>
                                                     <SelectorSkuHuella
+                                                        key={`${l.id_partida_resuelta}-sku${generacionSku}`}
                                                         idCategoria={l.id_categoria}
                                                         idMarca={l.id_marca}
                                                         marcaNombre={l.marca_nombre}
@@ -215,15 +311,48 @@ export function CotejoAltaModal({ open, onOpenChange, entrada, bandeja, onGuarda
                                                             }))
                                                         }
                                                         disabled={cargando}
+                                                        /* ⭐ MEJORA 52 — el SKU que nazca hereda lo que
+                                                           declaró la puerta (no un `false` inventado). */
+                                                        manejaNumeroSerie={l.lleva_ns}
+                                                        /* ⭐ MEJORA 52 — y el alta ABRE EL FORMULARIO,
+                                                           prellenado con la huella de la línea. */
+                                                        onCrearConFormulario={() => void abrirFormulario(l)}
+                                                        /* ⭐ FIX 08 Oct 2026 — y el ALTA RÁPIDA avisa
+                                                           igual: los dos caminos remontan a los
+                                                           hermanos (`generacionSku`) para que una
+                                                           huella repetida se vea sola en la 2ª línea. */
+                                                        onCrear={() => setGeneracionSku((v) => v + 1)}
                                                     />
                                                 </div>
                                                 <div className="space-y-1">
-                                                    <span className="text-xs text-muted-foreground">Física</span>
+                                                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                        Física
+                                                        {/* ⭐ El botón que abre la edición. Su etiqueta NO se
+                                                            cataloga (es un control, no una explicación). */}
+                                                        {!editando[l.id_partida_resuelta] && (
+                                                            <button
+                                                                type="button"
+                                                                className="inline-flex items-center gap-0.5 rounded px-1 text-[11px] font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                                                                onClick={() =>
+                                                                    setEditando((prev) => ({
+                                                                        ...prev,
+                                                                        [l.id_partida_resuelta]: true,
+                                                                    }))
+                                                                }
+                                                                disabled={cargando}
+                                                                title="Corregir la cantidad que entra al inventario"
+                                                            >
+                                                                <Pencil className="h-3 w-3" aria-hidden="true" />
+                                                                Editar
+                                                            </button>
+                                                        )}
+                                                    </span>
                                                     <Input
                                                         type="number"
-                                                        className="w-24"
+                                                        className="w-24 read-only:bg-surface-2 read-only:text-muted-foreground"
                                                         min={0}
                                                         max={l.cantidad_pendiente}
+                                                        readOnly={!editando[l.id_partida_resuelta]}
                                                         value={cantidades[l.id_partida_resuelta] ?? ''}
                                                         onChange={(e) =>
                                                             setCantidades((prev) => ({
@@ -233,6 +362,37 @@ export function CotejoAltaModal({ open, onOpenChange, entrada, bandeja, onGuarda
                                                         }
                                                     />
                                                 </div>
+                                            </div>
+                                        )}
+                                        {/* ⭐ El aviso de la cantidad editable: **UNA LÍNEA**, con el
+                                            tono de un error de formulario (lo pidió el dueño: *«algo
+                                            más sencillo como cuando te equivocas de password»*). El
+                                            porqué completo viaja en el `title` — el patrón del módulo:
+                                            la línea dice QUÉ pasa, el `title` dice POR QUÉ. */}
+                                        {!sinSaldo && editando[l.id_partida_resuelta] && (
+                                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                                <Ayuda
+                                                    k="alta.cantidad-fisica"
+                                                    inline
+                                                    className="text-[12px] text-destructive"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    className="text-[12px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                                                    onClick={() => {
+                                                        setCantidades((prev) => ({
+                                                            ...prev,
+                                                            [l.id_partida_resuelta]: String(l.cantidad_pendiente),
+                                                        }))
+                                                        setEditando((prev) => ({
+                                                            ...prev,
+                                                            [l.id_partida_resuelta]: false,
+                                                        }))
+                                                    }}
+                                                    title={porqueCantidad || undefined}
+                                                >
+                                                    Usar la pendiente ({l.cantidad_pendiente})
+                                                </button>
                                             </div>
                                         )}
                                     </div>
@@ -271,6 +431,47 @@ export function CotejoAltaModal({ open, onOpenChange, entrada, bandeja, onGuarda
                     </Button>
                 </DialogFooter>
             </DialogContent>
-        </Dialog>
+            </Dialog>
+
+            {/* ⭐ MEJORA 52 — EL FORMULARIO DEL PRODUCTO, ABIERTO DESDE EL COTEJO.
+                Va PRELLENADO con la HUELLA de la línea (categoría · marca · atributos) y con lo que
+                declaró la puerta (`lleva_ns` ⇒ «maneja número de serie»). Al guardar, el SKU creado
+                queda SELECCIONADO en su línea: el almacenista sigue cotejando sin volver a buscarlo. */}
+            {formulario ? (
+                cargandoCategorias ? (
+                    <Spinner etiqueta="Cargando las categorías…" className="py-4" />
+                ) : (
+                    <ProductoModal
+                        key={`alta-${formulario.linea.id_partida_resuelta}`}
+                        modo="crear"
+                        categorias={categorias}
+                        inicial={{
+                            id_categoria: formulario.linea.id_categoria ?? '',
+                            id_marca: formulario.linea.id_marca ?? '',
+                            /**
+                             * ⭐ FIX 08 Oct 2026 — **el nombre viene SUGERIDO por la HUELLA.**
+                             * Antes el formulario abría con el nombre **vacío** y el almacenista lo
+                             * tecleaba a mano teniendo la huella ya resuelta en la pantalla. Se usa la
+                             * MISMA función que el alta rápida (`nombreDesdeHuella`): los dos caminos
+                             * no pueden bautizar distinto al mismo producto.
+                             */
+                            nombre: nombreDesdeHuella(formulario.linea.marca_nombre, formulario.linea.atributos),
+                            atributos: aTexto(formulario.linea.atributos),
+                            maneja_numero_serie: formulario.linea.lleva_ns,
+                        }}
+                        onCerrar={() => setFormulario(null)}
+                        onExito={(creado) => {
+                            const linea = formulario.linea
+                            setFormulario(null)
+                            if (!creado) return
+                            setSkuSel((prev) => ({ ...prev, [linea.id_partida_resuelta]: creado.id }))
+                            // ⭐ Y las OTRAS líneas vuelven a buscar: una huella repetida tiene que
+                            // aparecer sola en la segunda (ver la nota de `generacionSku`).
+                            setGeneracionSku((v) => v + 1)
+                        }}
+                    />
+                )
+            ) : null}
+        </>
     )
 }

@@ -11,6 +11,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import { conteoSchema, salidaManualSchema } from '@/lib/validations/inventario'
 import type { ConteoInput, SalidaManualInput } from '@/lib/validations/inventario'
 import type { FiltrosExistencias } from '@/types/inventario'
@@ -100,8 +101,8 @@ export async function listarCategoriasYMarcas(): Promise<
             .eq('es_activo', true)
             .order('nombre', { ascending: true }),
     ])
-    if (cat.error) return { success: false, error: cat.error.message }
-    if (marcas.error) return { success: false, error: marcas.error.message }
+    if (cat.error) return { success: false, error: describirError(cat.error) }
+    if (marcas.error) return { success: false, error: describirError(marcas.error) }
     return {
         success: true,
         data: {
@@ -125,7 +126,7 @@ export async function listarUbicacionesActivas(): Promise<
         .select('id, rack, nivel, organizador, charola')
         .eq('es_activo', true)
         .order('rack', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return {
         success: true,
         data: (data ?? []).map((u) => ({
@@ -174,7 +175,7 @@ export async function listarExistencias(
     if (filtros.id_marca) query = query.eq('id_marca', filtros.id_marca)
 
     const { data, error, count } = await query
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     let filas = (data ?? []) as unknown as FilaExistenciaCruda[]
     if (filtros.estado) {
@@ -253,7 +254,7 @@ export async function listarMovimientosPorProducto(
         .eq('id_producto', idProducto)
         .order('created_at', { ascending: false })
         .range(desde, desde + tamano - 1)
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return {
         success: true,
         data: ((data ?? []) as unknown as FilaMovimientoCruda[]).map(aMovimiento),
@@ -314,7 +315,7 @@ export async function listarLotesPorProducto(
         )
         .eq('id_producto', idProducto)
         .order('created_at', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return {
         success: true,
         data: ((data ?? []) as unknown as FilaLoteCruda[]).map(aLote),
@@ -334,7 +335,7 @@ export async function obtenerMovimiento(id: string): Promise<RespuestaDato<Movim
         )
         .eq('id', id)
         .single()
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: aMovimiento(data as unknown as FilaMovimientoCruda) }
 }
 
@@ -360,7 +361,7 @@ async function consumirLotesFifo(
         .eq('id_producto', idProducto)
         .gt('cantidad_disponible', 0)
         .order('created_at', { ascending: true })
-    if (error) return { ok: false, error: error.message }
+    if (error) return { ok: false, error: describirError(error) }
 
     const lotes = (data ?? []) as unknown as LoteConsumible[]
     const disponible = lotes.reduce((acc, l) => acc + Number(l.cantidad_disponible), 0)
@@ -376,7 +377,7 @@ async function consumirLotesFifo(
             .from('lotes')
             .update({ cantidad_disponible: Number(lote.cantidad_disponible) - tomar })
             .eq('id', lote.id)
-        if (errUpd) return { ok: false, error: errUpd.message }
+        if (errUpd) return { ok: false, error: describirError(errUpd) }
         restante -= tomar
     }
     return { ok: true }
@@ -395,7 +396,7 @@ export async function registrarSalidaManual(input: SalidaManualInput): Promise<R
         .select('id, stock_actual, maneja_numero_serie')
         .eq('id', id_producto)
         .single()
-    if (errProd) return { success: false, error: errProd.message }
+    if (errProd) return { success: false, error: describirError(errProd) }
 
     const manejaSerie = (producto as { maneja_numero_serie: boolean }).maneja_numero_serie
     if (manejaSerie && numero_serie.trim() === '') {
@@ -427,7 +428,7 @@ export async function registrarSalidaManual(input: SalidaManualInput): Promise<R
         // El libro no tiene columna `notas`: el texto libre se concatena al motivo.
         motivo: notas.trim() === '' ? motivo : `${motivo} — ${notas.trim()}`,
     })
-    if (errMov) return { success: false, error: errMov.message }
+    if (errMov) return { success: false, error: describirError(errMov) }
 
     return { success: true }
 }
@@ -492,7 +493,7 @@ export async function listarConteos(
     if (filtros.fecha_hasta) query = query.lte('fecha_conteo', filtros.fecha_hasta)
 
     const { data, error, count } = await query
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return {
         success: true,
         data: ((data ?? []) as unknown as FilaConteoCruda[]).map(aConteo),
@@ -519,13 +520,13 @@ export async function obtenerConteo(id: string): Promise<RespuestaDato<ConteoInv
         )
         .eq('id', id)
         .single()
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const { data: renglones, error: errR } = await supabase
         .from('renglones_conteo')
         .select(`id, id_conteo, id_producto, cantidad_contada, productos ( nombre, sku )`)
         .eq('id_conteo', id)
-    if (errR) return { success: false, error: errR.message }
+    if (errR) return { success: false, error: describirError(errR) }
 
     const filas = (renglones ?? []) as unknown as FilaRenglonCruda[]
     // Stock del sistema ACTUAL por producto (para la diferencia en el detalle).
@@ -580,7 +581,7 @@ export async function crearConteo(input: ConteoInput): Promise<RespuestaDato<{ i
         })
         .select('id')
         .single()
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     const idConteo = (nuevo as { id: string }).id
 
     // BD real de renglones_conteo: solo (id_conteo, id_producto, cantidad_contada) + UNIQUE.
@@ -590,7 +591,7 @@ export async function crearConteo(input: ConteoInput): Promise<RespuestaDato<{ i
         cantidad_contada: Number(r.cantidad_contada),
     }))
     const { error: errR } = await supabase.from('renglones_conteo').insert(filas)
-    if (errR) return { success: false, error: errR.message }
+    if (errR) return { success: false, error: describirError(errR) }
 
     return { success: true, data: { id: idConteo } }
 }
@@ -616,10 +617,10 @@ export async function editarConteo(id: string, input: ConteoInput): Promise<Resp
             notas: parsed.data.notas.trim() === '' ? null : parsed.data.notas.trim(),
         })
         .eq('id', id)
-    if (errEnc) return { success: false, error: errEnc.message }
+    if (errEnc) return { success: false, error: describirError(errEnc) }
 
     const { error: errDel } = await supabase.from('renglones_conteo').delete().eq('id_conteo', id)
-    if (errDel) return { success: false, error: errDel.message }
+    if (errDel) return { success: false, error: describirError(errDel) }
 
     const filas = parsed.data.renglones.map((r) => ({
         id_conteo: id,
@@ -627,7 +628,7 @@ export async function editarConteo(id: string, input: ConteoInput): Promise<Resp
         cantidad_contada: Number(r.cantidad_contada),
     }))
     const { error: errIns } = await supabase.from('renglones_conteo').insert(filas)
-    if (errIns) return { success: false, error: errIns.message }
+    if (errIns) return { success: false, error: describirError(errIns) }
 
     return { success: true }
 }
@@ -645,7 +646,7 @@ export async function aplicarConteo(id: string): Promise<RespuestaAccion> {
         .from('renglones_conteo')
         .select('id_producto, cantidad_contada')
         .eq('id_conteo', id)
-    if (errR) return { success: false, error: errR.message }
+    if (errR) return { success: false, error: describirError(errR) }
 
     const filas = (renglones ?? []) as unknown as { id_producto: string; cantidad_contada: number }[]
     const stocks = await listarStocksProductos(filas.map((f) => f.id_producto))
@@ -678,7 +679,7 @@ export async function aplicarConteo(id: string): Promise<RespuestaAccion> {
                 origen_id: id,
                 motivo: `Conteo físico — faltante de ${Math.abs(diferencia)}`,
             })
-            if (errMov) return { success: false, error: errMov.message }
+            if (errMov) return { success: false, error: describirError(errMov) }
         } else {
             // Faltaba stock según el sistema → sobrante físico.
             if (manejaSerie) {
@@ -698,7 +699,7 @@ export async function aplicarConteo(id: string): Promise<RespuestaAccion> {
                 origen_id: id,
                 notas: 'Ajuste por conteo físico (sobrante)',
             })
-            if (errLote) return { success: false, error: errLote.message }
+            if (errLote) return { success: false, error: describirError(errLote) }
             const { error: errMov } = await supabase.from('movimientos_inventario').insert({
                 id_producto: renglon.id_producto,
                 id_lote: null,
@@ -710,7 +711,7 @@ export async function aplicarConteo(id: string): Promise<RespuestaAccion> {
                 origen_id: id,
                 motivo: `Conteo físico — sobrante de ${diferencia}`,
             })
-            if (errMov) return { success: false, error: errMov.message }
+            if (errMov) return { success: false, error: describirError(errMov) }
         }
     }
 
@@ -718,7 +719,7 @@ export async function aplicarConteo(id: string): Promise<RespuestaAccion> {
         .from('conteos_inventario')
         .update({ estado: 'aplicado' })
         .eq('id', id)
-    if (errEstado) return { success: false, error: errEstado.message }
+    if (errEstado) return { success: false, error: describirError(errEstado) }
 
     return { success: true }
 }
@@ -731,6 +732,6 @@ export async function cancelarConteo(id: string): Promise<RespuestaAccion> {
         return { success: false, error: 'Solo un conteo en borrador se puede cancelar.' }
     }
     const { error } = await supabase.from('conteos_inventario').update({ estado: 'cancelado' }).eq('id', id)
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true }
 }

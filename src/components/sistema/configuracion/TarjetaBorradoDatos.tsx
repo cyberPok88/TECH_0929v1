@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TARJETA DE BORRADO DE DATOS — el modal (Guía 2.4 · 05 Oct 2026)
@@ -18,13 +18,19 @@
 //   TOTAL se recalcula sumando → confirma en el diálogo del kit → la RPC borra en UNA
 //   transacción y en el orden de FK → **se vuelve a contar** (el recuento es la prueba).
 //
+// ⭐ FIX `g26_p1_b9` (07 Oct 2026) — **SI UNA FK DE OTRO PAQUETE LO BLOQUEA, LA PANTALLA
+//   DICE CUÁL Y LO MARCA EN UN CLIC.** La RPC devuelve el paquete faltante en el `DETAIL`
+//   del error; acá se cierra la confirmación y aparece el aviso al lado del botón.
+//   ⚠️ **NO se auto-marca**: el aviso ofrece, el humano decide. Auto-marcar sería que la
+//   herramienta elija por él qué más se borra — y esto no se deshace.
+//
 // ⭐ D13: el BORRADO TOTAL va APARTE y DESPUÉS — su propio bloque rojo, su propio botón,
 //   y **sin estado compartido** con las casillas (E6). Si estuviera arriba, el primer
 //   botón que vería el usuario sería el que vacía la empresa.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronRight, Loader2, Trash2 } from 'lucide-react'
+import { ChevronRight, Loader2, Trash2, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { BorradoTotal } from '@/components/sistema/configuracion/BorradoTotal'
@@ -80,6 +86,11 @@ export function TarjetaBorradoDatos({ open, onOpenChange }: TarjetaBorradoDatosP
     const [tildadas, setTildadas] = useState<Record<string, string[]>>({})
     const [cargandoCatalogo, setCargandoCatalogo] = useState(false)
     const [confirmando, setConfirmando] = useState(false)
+    /**
+     * ⭐ El paquete que la BD dijo que FALTA (FIX `g26_p1_b9`). `null` = no hay nada que ofrecer.
+     * No es un error de pantalla: es una instrucción que llegó desde la RPC.
+     */
+    const [faltante, setFaltante] = useState<PaqueteBorrado | null>(null)
 
     // ⚠️ El efecto SOLO dispara la acción async, como **IIFE inline** (el patrón de `AlmacenHub`).
     //    Dos intentos previos fallaron el lint: ① resetear estado en el cuerpo del efecto;
@@ -116,6 +127,7 @@ export function TarjetaBorradoDatos({ open, onOpenChange }: TarjetaBorradoDatosP
             setTildadas({})
             setFilasCatalogo({})
             setConteo(null)
+            setFaltante(null)
         }
         onOpenChange(o)
     }
@@ -135,11 +147,18 @@ export function TarjetaBorradoDatos({ open, onOpenChange }: TarjetaBorradoDatosP
     }, [])
 
     const alternar = (id: PaqueteBorrado, valor: boolean) => {
-        setMarcados((prev) => (valor ? [...prev, id] : prev.filter((p) => p !== id)))
+        setMarcados((prev) =>
+            valor ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((p) => p !== id)
+        )
+        // ⭐ Si el humano marca a mano el paquete que la BD reclamó, el aviso ya no hace falta.
+        if (valor && id === faltante) setFaltante(null)
         if (valor && (id === 'catalogos' || id === 'sistema') && !filasCatalogo[id === 'sistema' ? 'roles' : 'marcas_producto']) {
             void cargarCatalogo()
         }
     }
+
+    /** El nombre que se LEE. El id es el idioma del protocolo; esto es el de la pantalla. */
+    const nombreDe = (id: PaqueteBorrado): string => PAQUETES_UI.find((p) => p.id === id)?.nombre ?? id
 
     const tildar = (tabla: string, id: string, valor: boolean) => {
         setTildadas((prev) => {
@@ -166,12 +185,20 @@ export function TarjetaBorradoDatos({ open, onOpenChange }: TarjetaBorradoDatosP
 
     const borrar = async (): Promise<{ error: string | null }> => {
         const r = await borrarDatosAction({ paquetes: marcados, seleccion: tildadas })
-        if (!r.success) return { error: r.error ?? 'No se pudo borrar' }
+        if (!r.success) {
+            // ⭐ FIX `g26_p1_b9`: la BD dijo QUÉ paquete falta ⇒ se cierra la confirmación y el
+            //    aviso aparece al lado del botón. Dejar el diálogo abierto con «Sí, borrar»
+            //    invitaría a apretar otra vez el mismo botón que acaba de fallar.
+            setFaltante(r.paqueteFaltante ?? null)
+            if (r.paqueteFaltante) setConfirmando(false)
+            return { error: r.error ?? 'No se pudo borrar' }
+        }
         // ⭐ El recuento ES la prueba de que el borrado ocurrió.
         const c = await pedirConteoPaquetes()
         setConteo('error' in c ? [] : c.filas)
         setMarcados([])
         setTildadas({})
+        setFaltante(null)
         return { error: null }
     }
 
@@ -183,6 +210,7 @@ export function TarjetaBorradoDatos({ open, onOpenChange }: TarjetaBorradoDatosP
             setMarcados([])
             setTildadas({})
             setFilasCatalogo({})
+            setFaltante(null)
         })()
     }
 
@@ -272,6 +300,33 @@ export function TarjetaBorradoDatos({ open, onOpenChange }: TarjetaBorradoDatosP
                         </div>
                     )}
 
+                    {/* ⭐ FIX `g26_p1_b9` — el borrado falló y la BD dijo QUÉ paquete falta.
+                        Va al lado del botón (es lo que hay que apretar después) y **no marca
+                        nada solo**: el aviso ofrece, el humano decide. */}
+                    {faltante ? (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive-bg/50 px-3.5 py-2.5">
+                            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+                            <div className="min-w-0 flex-1">
+                                <p className="text-[12.5px] font-medium text-destructive">
+                                    Falta marcar {nombreDe(faltante)}
+                                </p>
+                                <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
+                                    Tiene datos que apuntan a lo que marcaste, así que <b>no se borró
+                                    nada</b>. Marcalo y volvé a intentar.
+                                </p>
+                            </div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive-bg"
+                                onClick={() => alternar(faltante, true)}
+                            >
+                                Marcar {nombreDe(faltante)}
+                            </Button>
+                        </div>
+                    ) : null}
+
                     <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
                         <div className="min-w-0">
                             <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -301,7 +356,14 @@ export function TarjetaBorradoDatos({ open, onOpenChange }: TarjetaBorradoDatosP
                 open={confirmando}
                 titulo="¿Borrar lo seleccionado?"
                 descripcion={`Se van a borrar ${total} filas: ${nombresMarcados}.`}
-                detalle="No se puede deshacer, y no hay respaldo."
+                detalle={
+                    // ⭐ MEJORA `g26_p1_b10`: borrar Entradas reinicia SU folio. Se avisa en la
+                    // confirmación porque el conteo **no** lo muestra: no es una fila que se pierde,
+                    // es numeración que vuelve a empezar.
+                    marcados.includes('entradas')
+                        ? 'No se puede deshacer, y no hay respaldo. El folio de ingreso vuelve a 0: la próxima entrada entra como ING-0001.'
+                        : 'No se puede deshacer, y no hay respaldo.'
+                }
                 confirmLabel="Sí, borrar"
                 variant="destructive"
                 successMessage="Borrado. El conteo se actualizó."

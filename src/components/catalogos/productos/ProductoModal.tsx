@@ -11,7 +11,7 @@
 // defaults: unidad Pieza e impuesto IVA 16 % · cambiar de categoría vacía atributos.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -43,12 +43,60 @@ import { productoFormDataVacio } from '@/types/productos'
 
 const SECCIONES = ['Identidad', 'Clasificación', 'Precios', 'Inventario', 'Fiscal SAT', 'Control']
 
+/** Los defaults del formulario, en UN solo lugar (los usan la carga de catálogos y el guardado). */
+const UNIDAD_POR_DEFECTO = 'Pieza'
+const IMPUESTO_POR_DEFECTO = 'IVA_16'
+
+/**
+ * ⭐ FIX 08 Oct 2026 (lo reportó el dueño en la VF) — **los defaults se resuelven TAMBIÉN al guardar.**
+ *
+ * El síntoma: *«tengo que abrir la pestaña 4 Inventario para que se seleccione la unidad de medida;
+ * si no abro la pestaña, no deja guardar porque pide la unidad de medida»*. El único lugar donde se
+ * veía el select era esa pestaña, y Guardar respondía **«Elige la unidad de medida»**.
+ *
+ * La causa: el default se escribía **sólo** en el efecto de carga de catálogos — una promesa que
+ * resuelve DESPUÉS del primer render. Entre el montaje y esa resolución, `form.id_unidad_medida`
+ * seguía vacío y Guardar lo rechazaba; abrir la pestaña no cambiaba el dato, **cambiaba el momento**
+ * (para entonces la promesa ya había vuelto). O sea: un defecto de **carrera**, y por eso se veía
+ * intermitente.
+ *
+ * ⇒ Los defaults se resuelven con **una sola función**, en los dos momentos: cuando llegan los
+ * catálogos **y** justo antes de validar. Si el catálogo ya está en memoria, Guardar **no depende de
+ * qué pestaña se abrió**. Es idempotente: nunca pisa un valor elegido a mano.
+ */
+function resolverDefaults(
+    unidades: UnidadMedidaFila[],
+    impuestos: ImpuestoFila[],
+    form: ProductoFormData
+): ProductoFormData {
+    const unidad =
+        form.id_unidad_medida ||
+        unidades.find((u) => u.es_activo && u.nombre === UNIDAD_POR_DEFECTO)?.id ||
+        ''
+    const impuesto =
+        form.id_impuesto || impuestos.find((i) => i.clave === IMPUESTO_POR_DEFECTO)?.id || ''
+    if (unidad === form.id_unidad_medida && impuesto === form.id_impuesto) return form
+    return { ...form, id_unidad_medida: unidad, id_impuesto: impuesto }
+}
+
 interface ProductoModalProps {
     modo: 'crear' | 'editar'
     producto?: Producto | null
     categorias: CategoriaFila[]
     onCerrar: () => void
-    onExito: () => void
+    /**
+     * ⭐ MEJORA 52 (07 Oct 2026) — en **modo crear** entrega el producto recién creado, para que quien
+     * abrió el formulario **desde otro flujo** (el alta del cotejo en Almacén) pueda dejarlo
+     * **seleccionado** sin volver a buscarlo. Los llamadores que no lo necesitan siguen pasando una
+     * función sin parámetros.
+     */
+    onExito: (creado?: { id: string; sku: string }) => void
+    /**
+     * ⭐ MEJORA 52 — **el formulario viene PRELLENADO con la HUELLA** que la Revisión dejó: la
+     * categoría de la partida, su marca y sus atributos. Sin esto, dar de alta desde Almacén
+     * obligaría a volver a teclear lo que la pieza ya sabe.
+     */
+    inicial?: Partial<ProductoFormData> | null
 }
 
 interface MarcaOpcion { id: string; nombre: string }
@@ -65,23 +113,27 @@ function esquemaEfectivo(categorias: CategoriaFila[], idCategoria: string): Atri
     return []
 }
 
-export function ProductoModal({ modo, producto, categorias, onCerrar, onExito }: ProductoModalProps) {
-    const [form, setForm] = useState<ProductoFormData>(() =>
-        producto ? productoAFormulario(producto) : productoFormDataVacio()
-    )
+export function ProductoModal({ modo, producto, categorias, onCerrar, onExito, inicial }: ProductoModalProps) {
+    const [form, setForm] = useState<ProductoFormData>(() => {
+        if (producto) return productoAFormulario(producto)
+        const base = productoFormDataVacio()
+        return inicial ? { ...base, ...inicial } : base
+    })
     const [seccion, setSeccion] = useState(0)
     const [error, setError] = useState<string | null>(null)
     const [ocupado, setOcupado] = useState(false)
 
     const [categoriasLocal, setCategoriasLocal] = useState<CategoriaFila[]>(categorias)
+    /** La categoría de la que se derivan raíz y hoja: la del producto (editar) o la del prellenado. */
+    const idCategoriaBase = producto?.id_categoria ?? inicial?.id_categoria ?? ''
     const [idRaiz, setIdRaiz] = useState(() => {
-        if (!producto?.id_categoria) return ''
-        const fila = categorias.find((c) => c.id === producto.id_categoria)
+        if (!idCategoriaBase) return ''
+        const fila = categorias.find((c) => c.id === idCategoriaBase)
         return fila?.id_categoria_padre ?? fila?.id ?? ''
     })
     const [idHoja, setIdHoja] = useState(() => {
-        if (!producto?.id_categoria) return ''
-        const fila = categorias.find((c) => c.id === producto.id_categoria)
+        if (!idCategoriaBase) return ''
+        const fila = categorias.find((c) => c.id === idCategoriaBase)
         return fila?.id_categoria_padre ? fila.id : ''
     })
 
@@ -124,41 +176,59 @@ export function ProductoModal({ modo, producto, categorias, onCerrar, onExito }:
         setForm((f) => ({ ...f, [clave]: valor }))
     }, [])
 
-    // Catálogos del formulario (una carga) + defaults Pieza / IVA 16 %.
-    useEffect(() => {
-        let activo = true
-        Promise.all([listarUnidadesMedida(), listarImpuestos(), listarUbicacionesAlmacen()]).then(
-            ([un, imp, ubi]) => {
-                if (!activo) return
-                if (un.success) setUnidades(un.data ?? [])
-                if (imp.success) setImpuestos(imp.data ?? [])
+    /**
+     * ⭐ FIX 08 Oct 2026 (VF del dueño) — **LOS CATÁLOGOS SE PIDEN CUANDO SE ABRE EL DESPLEGABLE, NO AL
+     * ABRIR EL FORMULARIO.**
+     *
+     * Lo reportó así: *«cuando abre el form de nuevo producto pide la unidad de medida; por defecto pon
+     * Pieza, pero que no busque ese dato en la base a menos que abran el desplegable de las opciones,
+     * porque siento que hace una búsqueda en la BD al abrir el formulario»*. **Y era cierto:** al montar
+     * se disparaban **5 consultas** (`unidades` · `impuestos` · `ubicaciones` · claves SAT · marcas), y
+     * el caso más común —el alta que abre el cotejo— solo quiere **escribir un nombre**: categoría,
+     * marca y atributos **ya vienen de la huella**.
+     *
+     * ⇒ Los tres catálogos del formulario se cargan **una sola vez, al primer desplegable que se abre**
+     * (`onFocus`), y `guardar()` los pide **solo si de verdad hacen falta** (si el default quedó sin
+     * resolver). El campo muestra el default **sin consultar nada**: la primera opción dice
+     * «Pieza (por defecto)».
+     *
+     * ⚠️ La promesa se guarda **en un ref**, no en estado: así dos desplegables que se abran seguidos
+     * —o un `guardar()` mientras la carga vuela— **comparten la misma consulta** en vez de duplicarla.
+     */
+    const catalogoPromesa = useRef<Promise<{ unidades: UnidadMedidaFila[]; impuestos: ImpuestoFila[] }> | null>(null)
+    const cargarCatalogos = useCallback(() => {
+        if (!catalogoPromesa.current) {
+            catalogoPromesa.current = Promise.all([
+                listarUnidadesMedida(),
+                listarImpuestos(),
+                listarUbicacionesAlmacen(),
+            ]).then(([un, imp, ubi]) => {
+                const u = un.success ? un.data ?? [] : []
+                const i = imp.success ? imp.data ?? [] : []
                 if (ubi.success) setUbicaciones(ubi.data ?? [])
-                setForm((f) => ({
-                    ...f,
-                    id_unidad_medida:
-                        f.id_unidad_medida === ''
-                            ? (un.data?.find((u) => u.nombre === 'Pieza')?.id ?? '')
-                            : f.id_unidad_medida,
-                    id_impuesto:
-                        f.id_impuesto === ''
-                            ? (imp.data?.find((i) => i.clave === 'IVA_16')?.id ?? '')
-                            : f.id_impuesto,
-                }))
-            }
-        )
-        return () => { activo = false }
+                setUnidades(u)
+                setImpuestos(i)
+                setForm((f) => resolverDefaults(u, i, f))
+                return { unidades: u, impuestos: i }
+            })
+        }
+        return catalogoPromesa.current
     }, [])
 
-    // Lista SAT del subset ProdServ (desplegable de la sección Fiscal · MEJORA 04 Sep).
-    // La clave de unidad del SAT NO se pregunta aquí: se deriva de la unidad de
-    // medida (Inventario) al guardar — resolverClaveUnidadSAT en la Server Action.
-    useEffect(() => {
-        let activo = true
-        listarClavesSAT('prod_serv').then((res) => {
-            if (!activo) return
-            if (res.success) setSatProd(res.data ?? [])
-        })
-        return () => { activo = false }
+    /**
+     * La lista SAT del subset ProdServ (desplegable de la sección Fiscal · MEJORA 04 Sep) — **también
+     * perezosa**: es la consulta más larga de las cinco y la mayoría de las altas no la miran.
+     * La clave de unidad del SAT NO se pregunta aquí: se deriva de la unidad de medida al guardar
+     * (`resolverClaveUnidadSAT` en la Server Action).
+     */
+    const satPromesa = useRef<Promise<void> | null>(null)
+    const cargarSAT = useCallback(() => {
+        if (!satPromesa.current) {
+            satPromesa.current = listarClavesSAT('prod_serv').then((res) => {
+                if (res.success) setSatProd(res.data ?? [])
+            })
+        }
+        return satPromesa.current
     }, [])
 
     const elegirCategoria = useCallback(
@@ -243,29 +313,56 @@ export function ProductoModal({ modo, producto, categorias, onCerrar, onExito }:
             setError('Elige la subcategoría (la raíz elegida tiene subcategorías).')
             return
         }
-        const parsed = productoSchema.safeParse(form)
+        /**
+         * ⭐ FIX 08 Oct 2026 — **los defaults se resuelven ACÁ, y los catálogos se piden sólo si de
+         * verdad hacen falta.**
+         *
+         * Dos defectos en uno, arreglados juntos: (a) Guardar rechazaba con «Elige la unidad de medida»
+         * a quien no abría la pestaña Inventario —el dato ya estaba resuelto en memoria: era una
+         * carrera—; y (b) desde hoy los catálogos **no** se cargan al abrir el formulario (se piden al
+         * abrir el desplegable), así que si el default aún está sin resolver **se pide acá**, que es el
+         * único momento en que el dato es imprescindible. Se escribe también al estado para que la
+         * pestaña Inventario **muestre** lo que se va a guardar — el defecto era justo no poder verlo.
+         */
+        let efectivo = form
+        if (efectivo.id_unidad_medida === '' || efectivo.id_impuesto === '') {
+            const cat = await cargarCatalogos()
+            efectivo = resolverDefaults(cat.unidades, cat.impuestos, efectivo)
+        }
+        efectivo = resolverDefaults(unidades, impuestos, efectivo)
+        if (efectivo !== form) setForm(efectivo)
+        const parsed = productoSchema.safeParse(efectivo)
         if (!parsed.success) {
             setError(parsed.error.issues[0]?.message ?? 'Datos no válidos.')
             return
         }
-        const errores = validarAtributosContraEsquema(convertirAtributosCrudos(form.atributos, esquema), esquema)
+        const errores = validarAtributosContraEsquema(convertirAtributosCrudos(efectivo.atributos, esquema), esquema)
         if (errores.length > 0) {
             setError(errores[0])
             return
         }
         setOcupado(true)
-        const res =
-            modo === 'crear'
-                ? await crearProducto(form)
-                : producto
-                  ? await editarProducto(producto.id, form)
-                  : { success: false as boolean, error: 'Producto no identificado.' }
+        if (modo === 'crear') {
+            const res = await crearProducto(efectivo)
+            setOcupado(false)
+            if (!res.success) {
+                setError(res.error ?? 'No se pudo guardar el producto.')
+                return
+            }
+            toast.success(res.data?.existente ? `Ya existía ${res.data.sku} — se reutiliza` : 'Producto creado')
+            // ⭐ MEJORA 52 — se entrega el creado para que el flujo que abrió el formulario lo seleccione.
+            onExito(res.data)
+            return
+        }
+        const res = producto
+            ? await editarProducto(producto.id, efectivo)
+            : { success: false as boolean, error: 'Producto no identificado.' }
         setOcupado(false)
         if (!res.success) {
             setError(res.error ?? 'No se pudo guardar el producto.')
             return
         }
-        toast.success(modo === 'crear' ? 'Producto creado' : 'Producto actualizado')
+        toast.success('Producto actualizado')
         onExito()
     }
 
@@ -466,7 +563,14 @@ export function ProductoModal({ modo, producto, categorias, onCerrar, onExito }:
                                     <Label>Impuesto <span className="text-destructive">*</span></Label>
                                     <select value={form.id_impuesto}
                                         onChange={(e) => setCampo('id_impuesto', e.target.value)}
+                                        /* ⭐ FIX 08 Oct 2026 — los catálogos se piden AL ABRIR el
+                                           desplegable, no al abrir el formulario. Antes de eso, la
+                                           lista vacía muestra el default de la casa. */
+                                        onFocus={() => void cargarCatalogos()}
                                         className="h-9 rounded-md border border-input bg-surface px-3 text-sm text-foreground">
+                                        <option value="">
+                                            {impuestos.length === 0 ? 'IVA 16 % (por defecto)' : '— elige impuesto —'}
+                                        </option>
                                         {impuestos.filter((i) => i.es_activo).map((i) => (
                                             <option key={i.id} value={i.id}>{i.nombre}</option>
                                         ))}
@@ -482,7 +586,14 @@ export function ProductoModal({ modo, producto, categorias, onCerrar, onExito }:
                                         <Label>Unidad de medida <span className="text-destructive">*</span></Label>
                                         <select value={form.id_unidad_medida}
                                             onChange={(e) => setCampo('id_unidad_medida', e.target.value)}
+                                            /* ⭐ FIX 08 Oct 2026 — el pedido textual del dueño: *«pide la
+                                               unidad de medida, por defecto pon Pieza, pero que no busque
+                                               ese dato en la base a menos que abran el desplegable»*. */
+                                            onFocus={() => void cargarCatalogos()}
                                             className="h-9 rounded-md border border-input bg-surface px-3 text-sm text-foreground">
+                                            <option value="">
+                                                {unidades.length === 0 ? 'Pieza (por defecto)' : '— elige unidad —'}
+                                            </option>
                                             {unidades.filter((u) => u.es_activo).map((u) => (
                                                 <option key={u.id} value={u.id}>{u.nombre}</option>
                                             ))}
@@ -497,6 +608,7 @@ export function ProductoModal({ modo, producto, categorias, onCerrar, onExito }:
                                         <Label>Ubicación por defecto</Label>
                                         <select value={form.id_ubicacion_default}
                                             onChange={(e) => setCampo('id_ubicacion_default', e.target.value)}
+                                            onFocus={() => void cargarCatalogos()}
                                             className="h-9 rounded-md border border-input bg-surface px-3 text-sm text-foreground">
                                             <option value="">Sin ubicación</option>
                                             {ubicaciones.filter((u) => u.es_activo).map((u) => (
@@ -529,9 +641,15 @@ export function ProductoModal({ modo, producto, categorias, onCerrar, onExito }:
                                     <select
                                         value={form.id_clave_prod_serv_sat}
                                         onChange={(e) => setCampo('id_clave_prod_serv_sat', e.target.value)}
+                                        /* ⭐ FIX 08 Oct 2026 — la lista SAT también es perezosa. */
+                                        onFocus={() => void cargarSAT()}
                                         className="h-9 rounded-md border border-input bg-surface px-3 text-sm text-foreground"
                                     >
-                                        <option value="">Sin asignar (CFDI V2)</option>
+                                        <option value="">
+                                            {satProd.length === 0
+                                                ? 'Sin asignar (CFDI V2) — abrí la lista para cargarla'
+                                                : 'Sin asignar (CFDI V2)'}
+                                        </option>
                                         {satProd.map((c) => (
                                             <option key={c.id} value={c.id}>
                                                 {c.clave} — {c.descripcion}

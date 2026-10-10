@@ -6,11 +6,12 @@
 // ⭐ EXTRACCIÓN 24 Sep 2026 (usuario) — el pedido: *«en la columna estado aparece la píldora
 // del estado, en las que aparece en revisión técnica que sea un link para abrir modal para
 // mostrar el avance de la revisión … en la etapa 2 se resuelve cómo mostrar la tabla de los
-// detalles de los ítems»*. En vez de copiar la tabla del desglose del técnico, sale de
-// `PartidasRevision` a este componente presentacional y las DOS superficies la consumen:
+// detalles de los ítems»*. En vez de copiar la tabla del desglose del técnico, salió de la fila
+// expandida —cuyo contenedor se retiró el 06 Oct 2026: su trabajo vive en `AvanceRevisionModal`—
+// a este componente presentacional, y las DOS superficies la consumen:
 //
-//   · `PartidasRevision`      → el desglose del acordeón de la cola del técnico (con sus puertas);
-//   · `AvanceRevisionModal`   → el mismo avance en **solo lectura** desde Recepción.
+//   · `AvanceRevisionModal` en la cola del TÉCNICO → el desglose con sus puertas (interactivo);
+//   · `AvanceRevisionModal` desde **Recepción**    → el mismo avance en **solo lectura**.
 //
 // El contrato es el de la etapa: la huella que produjo la REVISIÓN (una línea por grupo — una
 // partida de 100 discos puede rendir 2TB y 4TB: se pintan todas), el avance «revisadas/total» con
@@ -19,6 +20,24 @@
 // ⚠️ En solo lectura NO se pintan controles muertos: sin `onVerDev` la píldora queda píldora, y
 // sin `onIniciar`/`onVerResultado`/`onLiberar` la columna de acciones no existe. Un botón que no
 // hace nada enseña a ignorar esa zona (SISTEMA_COMPONENTES §8).
+//
+// ⭐ EL DESGLOSE EN UN MODAL (Fase 2 · 06 Oct 2026 · mockup aprobado): el chevron de la cola de
+// Revisión ya no despliega la fila — abre `AvanceRevisionModal`, que hospeda ESTE mismo componente
+// con la prop **`enModal`** (el precedente exacto es `PartidasExpandidas enModal`, de Recepción).
+// Lo que cambia con `enModal` es el REPARTO DEL ALTO y la JERARQUÍA, no el contenido:
+//   (a) **Z1 sale del scroll** (`shrink-0`): folio, etapa, frase y las 4 puertas quedan fijos;
+//   (b) **Z2 + Z3 scrollean**: el cuerpo toma el alto sobrante (`min-h-0 flex-1 overflow-y-auto`);
+//   (c) **la dominante cede**: si el PIE del modal lleva la acción siguiente, la de la toolbar baja
+//       a `outline` con la MISMA frase — una sola `default` por pantalla (SPEC §2.3);
+//   (d) `tactil` **se reenvía**, jamás se deduce del ancho de pantalla (SPEC §1.1 · L8).
+// ⚠️ NO se duplica el componente: es el mismo display en otra altura.
+//
+// ⭐ MEJORA 47 · LAS AYUDAS DE PANTALLA (06 Oct 2026): los `title` de esta superficie eran
+// LITERALES inline — sus explicaciones **no se podían apagar**. Ahora viven en
+// `config/ayudas/revision.ts` (claves `revision.detalle-*`) y se consumen con `useAyuda` (los que
+// no dependen de la fila) o con `textoAyuda` (los que sí: la lista de hooks no puede estar dentro
+// de un `.map()`). Lo que NO se cataloga —el DATO y la BANDERA— está dicho clave por clave en el
+// registro.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useMemo, useState } from 'react'
@@ -28,6 +47,7 @@ import { BotonDespliegue, Pildora } from '@/components/data-table'
 import { CLASE_CAJA_TABLA, CLASE_THEAD_TABLA, CLASE_TH_TABLA } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { textoAyuda, useAyuda } from '@/components/ui/Ayuda'
 import { DocumentoImprimible } from '@/components/imprimibles'
 import { ActaRevisionImprimible } from '@/components/entradas/imprimibles/ActaRevisionImprimible'
 import { construirDatosActaRevision } from '@/components/entradas/imprimibles/datos-acta-revision'
@@ -38,6 +58,7 @@ import {
     lineasDePartidas,
     valoresAtributos,
 } from '@/components/entradas/columnas-entrada'
+import { useAuth } from '@/lib/stores/auth-store'
 import { cn } from '@/lib/utils'
 import { puedeLiberar, TEXTO_ETAPA_REVISION, TONO_ETAPA_REVISION } from '@/types/entradas'
 import type { Entrada, PartidaConAvance } from '@/types/entradas'
@@ -73,6 +94,16 @@ interface PartidasAvanceProps {
      * puerta que evita abrir el modal 20 veces en una entrada de 20 partidas.
      */
     onLiberar?: (entrada: Entrada, idPartida: string | null, idGrupo?: string) => void
+    /**
+     * ⭐ 06 Oct 2026 (Fase 2 · Revisión) — **el desglose hospedado en un MODAL**, el mismo display
+     * y la misma fuente (`AvanceRevisionModal` lo monta en vez de copiar una segunda versión).
+     *
+     * El precedente exacto es `PartidasExpandidas enModal`. Lo que cambia es el reparto del alto y
+     * la jerarquía — (a) Z1 fuera del scroll, (b) Z2 + Z3 scrolleando, (c) la dominante baja a
+     * `outline` porque el pie del diálogo lleva la acción siguiente, (d) `tactil` llega reenviado.
+     * Fuera del modal nada de esto aplica: sigue siendo el bloque del acordeón de la fila.
+     */
+    enModal?: boolean
     className?: string
 }
 
@@ -84,6 +115,57 @@ function estadoDePartida(p: PartidaConAvance): {
     if (p.revisadas === 0) return { texto: 'Pendiente', tono: 'advertencia' }
     if (p.restantes === 0) return { texto: 'Cerrada', tono: 'listo' }
     return { texto: 'En curso', tono: p.dev_cantidad > 0 ? 'peligro' : 'advertencia' }
+}
+
+/**
+ * ⭐ 06 Oct 2026 (Fase 2 · Revisión) — **LO QUE LA ENTRADA NECESITA AHORA**, en una sola
+ * definición.
+ *
+ * Lo consumen DOS alturas del mismo hecho: la **toolbar de Z1** de este componente y el **pie del
+ * modal** (`AvanceRevisionModal`). Si cada una lo derivara por su cuenta, el botón del pie y el de
+ * la toolbar podrían decir cifras distintas de lo mismo — el defecto que el módulo ya pagó con los
+ * encabezados de tabla. Por eso la regla vive acá y el modal la importa.
+ *
+ * Es una función PURA a propósito: no sabe de permisos (eso lo dice quién la llama, con `hay*`) ni
+ * de textos (los `title` son ayudas de pantalla y se resuelven donde hay hooks).
+ */
+export interface ResumenAvance {
+    /** Σ de aprobadas **sin liberar** de TODA la entrada: la cifra de `Liberar todo (n)`. */
+    liberables: number
+    /** La partida que todavía tiene piezas por revisar, o `null` si ya no queda ninguna. */
+    partidaPendiente: PartidaConAvance | null
+    /** Piezas que faltan por revisar en la entrada: la cifra de `Revisar (n)`. */
+    faltan: number
+    /**
+     * La acción dominante —*lo que esta entrada necesita AHORA*: primero revisar (si quedan piezas)
+     * y, si no, liberar (si hay aprobadas sin salir)— o `null` si no hay ninguna.
+     */
+    dominante: 'revisar' | 'liberar' | null
+}
+
+export function resumenAvance(
+    entrada: Entrada,
+    partidas: PartidaConAvance[],
+    /** Las puertas que el CRUD le pasó a la superficie: sin ellas no hay acción que ofrecer. */
+    puertas: { hayIniciar?: boolean; hayLiberar?: boolean } = {}
+): ResumenAvance {
+    const liberables = partidas.reduce(
+        (s, p) =>
+            s + p.huellas.reduce((t, h) => t + Math.max(0, h.cantidad_aprobada - h.cantidad_liberada), 0),
+        0
+    )
+    const partidaPendiente = partidas.find((p) => p.restantes > 0) ?? null
+    const faltan = Math.max(
+        0,
+        entrada.piezas_total - entrada.piezas_aprobadas - entrada.devolucion_total
+    )
+    const dominante: ResumenAvance['dominante'] =
+        puertas.hayIniciar && partidaPendiente
+            ? 'revisar'
+            : puertas.hayLiberar && puedeLiberar(entrada.estado) && liberables > 0
+              ? 'liberar'
+              : null
+    return { liberables, partidaPendiente, faltan, dominante }
 }
 
 /** Un hito del timeline: la fecha ya formateada, o `—` si esa etapa no ocurrió. */
@@ -131,6 +213,7 @@ export function PartidasAvance({
     onIniciar,
     onVerResultado,
     onLiberar,
+    enModal = false,
     className,
 }: PartidasAvanceProps) {
     // ⭐ MEJORA 26 Sep 2026 — el despliegue de la PARTIDA (sus subpartidas).
@@ -174,35 +257,40 @@ export function PartidasAvance({
      */
     const totalProductos = useMemo(() => lineas.filter((l) => !l.esPartida).length, [lineas])
 
-    if (cargando) return <Spinner etiqueta="Cargando partidas…" className="py-1" />
-    if (partidas.length === 0) return <p className="text-sm text-muted-foreground">Sin partidas.</p>
-
-    /** Sin puertas no hay columna de acciones. */
-    const hayAcciones = Boolean(onIniciar || onVerResultado || onLiberar)
-    const faltanTotal = Math.max(
-        0,
-        entrada.piezas_total - entrada.piezas_aprobadas - entrada.devolucion_total
-    )
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ⚠️ LAS DERIVACIONES DE LA TOOLBAR VAN **ANTES** DE LOS `return` TEMPRANOS.
+    //
+    // No es estilo: abajo se consumen AYUDAS DE PANTALLA, y el estándar exige que los hooks se
+    // llamen **todos y siempre** (uno dentro de un ternario o después de un `return` condicional
+    // rompe el orden de los hooks — medido al cablear `ModalFormateo`). Y varios `title` llevan
+    // la cifra o el folio de la fila, así que el hook necesita el valor ya calculado.
+    // Son derivaciones PURAS (sin hooks): subirlas no cambia ningún comportamiento.
+    // ═══════════════════════════════════════════════════════════════════════════
     /**
      * ⭐ MEJORA 30 — lo aprobado **sin liberar** de TODA la entrada: la cifra de «Liberar todo».
      * Es la Σ de las mismas cifras que ofrecen las filas de producto y de partida.
+     * ⭐ 06 Oct 2026 — ahora sale del MISMO `resumenAvance` que el pie del modal: el botón del
+     * desglose y el del diálogo no pueden decir cifras distintas del mismo hecho.
      */
-    const liberablesEntrada = partidas.reduce(
-        (s, p) =>
-            s +
-            p.huellas.reduce(
-                (t, h) => t + Math.max(0, h.cantidad_aprobada - h.cantidad_liberada),
-                0
-            ),
-        0
+    const resumen = useMemo(
+        () =>
+            resumenAvance(entrada, partidas, {
+                hayIniciar: Boolean(onIniciar),
+                hayLiberar: Boolean(onLiberar),
+            }),
+        [entrada, partidas, onIniciar, onLiberar]
     )
+    const { liberables: liberablesEntrada, partidaPendiente, faltan: faltanTotal } = resumen
     /**
      * ⭐ MEJORA 34 — lo que gobierna la **toolbar de detalles**: si hay algo revisado (para ver/imprimir),
      * en qué partida sigue habiendo piezas por revisar (para `Revisar`) y **por qué** está apagada cada
      * acción. El motivo es parte del contrato: la SPEC §2.3 prohíbe deshabilitar sin decir por qué.
+     *
+     * ⚠️ Los `motivo*` son **BANDERA**, no ayuda: son el porqué de un control APAGADO y vaciarlos
+     * dejaría el botón mudo. Por eso **no** se catalogan (clasificador del estándar · §1.2) y viven
+     * acá, inline. Lo que SÍ se cataloga es el `title` del control **encendido**.
      */
     const hayRevision = entrada.piezas_aprobadas > 0 || entrada.devolucion_total > 0
-    const partidaPendiente = partidas.find((p) => p.restantes > 0) ?? null
     const puedeLiberarAqui = Boolean(onLiberar) && puedeLiberar(entrada.estado)
     const soloLectura = 'Esta vista es de solo lectura.'
     const motivoRevisar = !onIniciar ? soloLectura : 'La revisión ya terminó: no quedan piezas por revisar.'
@@ -212,21 +300,62 @@ export function PartidasAvance({
           ? 'La entrada ya avanzó: la liberación se hace en la etapa de Revisión.'
           : 'No hay piezas aprobadas sin liberar.'
     const motivoVer = hayRevision ? undefined : 'Todavía no hay nada revisado en esta entrada.'
+    /** Sin puertas no hay columna de acciones. */
+    const hayAcciones = Boolean(onIniciar || onVerResultado || onLiberar)
     /**
      * ⭐ MEJORA 34 — **jerarquía, no cuatro botones iguales** (SPEC §2.3: *«una sola `default` por
-     * pantalla»*). La acción dominante es **lo que esta entrada necesita AHORA**: primero revisar (si
-     * quedan piezas), y si no, liberar (si hay aprobadas sin salir). El resto son secundarias, y ver /
+     * pantalla»*). La acción dominante es **lo que esta entrada necesita AHORA**, y la deriva
+     * `resumenAvance` (la misma que consume el pie del modal). El resto son secundarias, y ver /
      * imprimir —lo menos frecuente— van discretas (`ghost`).
      */
-    const dominante: 'revisar' | 'liberar' | null =
-        onIniciar && partidaPendiente
-            ? 'revisar'
-            : puedeLiberarAqui && liberablesEntrada > 0
-              ? 'liberar'
-              : null
+    const dominante = resumen.dominante
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ⭐ MEJORA 47 · LAS AYUDAS DE PANTALLA (06 Oct 2026 · mockup aprobado)
+    //
+    // Todo texto de esta superficie que **EXPLICA** —y no es el dato ni la etiqueta de un
+    // control— se cataloga en `config/ayudas/revision.ts` (claves `revision.detalle-*`) y se
+    // consume de ahí: el usuario las prende y apaga desde el interruptor, por módulo y categoría.
+    //
+    // ⚠️ DOS FORMAS, porque los textos viven en dos momentos distintos del render:
+    //   · `useAyuda` — el `title` NO depende de la fila (las 4 puertas de Z1 y los 8 encabezados);
+    //   · `textoAyuda` — el `title` SÍ depende de la fila que se está pintando (las acciones y las
+    //     celdas de las filas de PARTIDA y de PRODUCTO). Ahí no se puede llamar un hook: el
+    //     `.map()` no es un componente. `textoAyuda` es la tercera forma del estándar, y existe
+    //     exactamente para esto.
+    // ═══════════════════════════════════════════════════════════════════════════
+    const preferenciasAyudas = useAuth((s) => s.usuario?.preferencias?.ayudas)
+
+    // Z1 · la toolbar de avance (las 4 puertas)
+    const ayudaRevisar = useAyuda('revision.detalle-revisar', {
+        partida: partidaPendiente?.partida ?? '',
+    })
+    const ayudaLiberarTodo = useAyuda('revision.detalle-liberar-todo', { n: liberablesEntrada })
+    const ayudaVer = useAyuda('revision.detalle-ver')
+    const ayudaImprimir = useAyuda('revision.detalle-imprimir')
+
+    // Z2 · los encabezados
+    const ayudaThNumero = useAyuda('revision.detalle-th-numero')
+    const ayudaThProducto = useAyuda('revision.detalle-th-producto')
+    const ayudaThRecib = useAyuda('revision.detalle-th-recib')
+    const ayudaThRevisadas = useAyuda('revision.detalle-th-revisadas')
+    const ayudaThAprob = useAyuda('revision.detalle-th-aprob')
+    const ayudaThDev = useAyuda('revision.detalle-th-dev')
+    const ayudaThFaltan = useAyuda('revision.detalle-th-faltan')
+    const ayudaThEstado = useAyuda('revision.detalle-th-estado')
+
+    // Z2 · la celda de la fila de PARTIDA que explica de dónde sale lo que se lee
+    const ayudaCeldaProductoPadre = useAyuda('revision.detalle-celda-producto-padre')
+
+    if (cargando) return <Spinner etiqueta="Cargando partidas…" className="py-1" />
+    if (partidas.length === 0) return <p className="text-sm text-muted-foreground">Sin partidas.</p>
 
     return (
-        <div className={cn('flex flex-col gap-3', className)}>
+        // ⭐ 06 Oct 2026 — CON `enModal` EL DESGLOSE LLENA SU HUECO: el diálogo le da una altura
+        // definida (una fila que scrollea) y acá adentro **Z1 queda fuera de ese scroll**
+        // (`shrink-0`) mientras **Z2 + Z3** son el cuerpo que scrollea. Sin `enModal` —la fila
+        // expandida— el componente sigue siendo un bloque que crece con su contenido.
+        <div className={cn('flex flex-col gap-3', enModal && 'h-full min-h-0', className)}>
             {/* ── ⭐ MEJORA 34 (usuario) — LA **TOOLBAR DE DETALLES** ─────────────
                 Es la barra de la ENTRADA: **dice el detalle** y lleva las acciones que afectan a
                 **toda la entrada** —todas sus partidas y sus productos—: `Revisar (n)` ·
@@ -239,9 +368,16 @@ export function PartidasAvance({
                 Tres profundidades de liberación, **el mismo modal**: la LÍNEA, la PARTIDA y la ENTRADA. */}
             <div
                 className={cn(
-                    'flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-border bg-surface-raised px-3 py-2.5',
+                    // ⭐ 06 Oct 2026 (decisión del dueño, D3.c) — LA TINTA DE LA TOOLBAR SE COPIA
+                    // DE RECEPCIÓN: la del módulo (`bg-primary-bg`) y su borde, en vez del
+                    // `surface-raised` que la dejaba casi del color del modal. Los dos desgloses
+                    // del módulo se leen igual.
+                    'flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-primary/30 bg-primary-bg px-3 py-2.5 shadow-premium-sm',
                     // ⭐ FIX 30-bis — en puesto de dedo, 44 (SPEC §1.1/§2.3) sin tocar el kit.
-                    tactil && '[&_button]:min-h-11'
+                    tactil && '[&_button]:min-h-11',
+                    // ⭐ 06 Oct 2026 — Z1 NO SE MUEVE: es la identidad y las puertas de la entrada
+                    // que se está leyendo. Con 20 partidas el cuerpo scrollea y esta barra queda.
+                    enModal && 'shrink-0'
                 )}
             >
                 {/* ── Zona 1 · QUIÉN es esta entrada y qué le falta ────────────────
@@ -278,29 +414,30 @@ export function PartidasAvance({
                     <Button
                         type="button"
                         // ⭐ MEJORA 34 — la dominante va SÓLIDA (SPEC §2.3: una sola `default`).
-                        variant={dominante === 'revisar' ? 'default' : 'outline'}
+                        // ⭐ 06 Oct 2026 — CON `enModal` CEDE: el pie del diálogo lleva la acción
+                        // siguiente (misma frase, misma cifra), y dos `default` en la misma pantalla
+                        // son la ley que se rompe. Baja a `outline` — y como la toolbar ahora tiene
+                        // tinta propia, necesita su propio relleno.
+                        variant={!enModal && dominante === 'revisar' ? 'default' : 'outline'}
                         size="sm"
                         disabled={!onIniciar || !partidaPendiente}
                         onClick={() => partidaPendiente && onIniciar?.(partidaPendiente.id)}
-                        title={
-                            partidaPendiente
-                                ? `Abre la revisión en la partida #${partidaPendiente.partida}, que es la que tiene piezas pendientes.`
-                                : motivoRevisar
-                        }
+                        // ⭐ MEJORA 47 — el `title` del control ENCENDIDO se cataloga; el porqué
+                        // del apagado (`motivoRevisar`) es BANDERA y vive inline.
+                        title={partidaPendiente ? ayudaRevisar : motivoRevisar}
                     >
                         <Play className="mr-1 h-3.5 w-3.5" /> Revisar ({faltanTotal})
                     </Button>
                     <Button
                         type="button"
-                        variant={dominante === 'liberar' ? 'default' : 'outline'}
+                        // ⭐ Mismo criterio que la puerta de arriba: con `enModal` la dominante vive
+                        // en el pie del diálogo (`AvanceRevisionModal`), no acá.
+                        variant={!enModal && dominante === 'liberar' ? 'default' : 'outline'}
                         size="sm"
                         disabled={!puedeLiberarAqui || liberablesEntrada === 0}
                         onClick={() => onLiberar?.(entrada, null)}
-                        title={
-                            liberablesEntrada > 0 && puedeLiberarAqui
-                                ? `Abre la liberación con TODOS los productos de la entrada ya cargados (${liberablesEntrada} pieza(s) aprobadas).`
-                                : motivoLiberar
-                        }
+                        // ⭐ MEJORA 47 — encendido va la ayuda; apagado, el porqué (bandera).
+                        title={liberablesEntrada > 0 && puedeLiberarAqui ? ayudaLiberarTodo : motivoLiberar}
                     >
                         <PackageCheck className="mr-1 h-3.5 w-3.5" /> Liberar todo ({liberablesEntrada})
                     </Button>
@@ -311,11 +448,7 @@ export function PartidasAvance({
                         size="sm"
                         disabled={!onVerResultado || !hayRevision}
                         onClick={() => onVerResultado?.(entrada)}
-                        title={
-                            hayRevision
-                                ? 'El resultado de la revisión de toda la entrada.'
-                                : motivoVer
-                        }
+                        title={hayRevision ? ayudaVer : motivoVer}
                     >
                         <Eye className="mr-1 h-3.5 w-3.5" /> Ver revisión completa
                     </Button>
@@ -325,11 +458,7 @@ export function PartidasAvance({
                         size="sm"
                         disabled={!hayRevision}
                         onClick={() => setImprimir(true)}
-                        title={
-                            hayRevision
-                                ? 'Acta de revisión para firmar: partidas, productos, aprobadas y DEV.'
-                                : motivoVer
-                        }
+                        title={hayRevision ? ayudaImprimir : motivoVer}
                     >
                         <Printer className="mr-1 h-3.5 w-3.5" /> Imprimir revisión
                     </Button>
@@ -348,7 +477,19 @@ export function PartidasAvance({
                 fallback={ActaRevisionImprimible}
             />
             {/* ── Una sola tabla alineada, un solo encabezado ───────────────── */}
-            <div className={cn(CLASE_CAJA_TABLA, 'shadow-premium-sm')}>
+            {/* ⭐ 06 Oct 2026 (b) — **Z2 SCROLLEA**. Con `enModal`, ESTE contenedor se queda con el
+                alto sobrante y su propio `overflow-y: auto` (el `overflow-hidden` de la caja sigue
+                gobernando el eje X y las esquinas redondeadas, así que la barra va adentro). Con el
+                contenido corto la caja abraza sus filas —como la dibuja el mockup—; con 20 partidas
+                se encoge (`min-h-0`) y scrollea, y **Z1 y Z4 no se mueven**. El `<thead>` del cromo
+                ya es `sticky`, así que los encabezados viajan dentro de este scroll. */}
+            <div
+                className={cn(
+                    CLASE_CAJA_TABLA,
+                    'shadow-premium-sm',
+                    enModal && 'min-h-0 shrink overflow-y-auto'
+                )}
+            >
                 {/* ⚠️ `border-collapse`: sin él la tabla usa el default `separate`, y en el modelo
                     de bordes SEPARADOS los bordes de un `<tr>` NO se pintan — las reglas de fila
                     que ya estaban escritas (`border-t`) eran invisibles. Mismo arreglo que
@@ -358,49 +499,49 @@ export function PartidasAvance({
                         <tr>
                             <th
                                 className={cn(TH, 'w-14')}
-                                title="En la fila de PARTIDA, el número de la partida declarada; en las de producto, el consecutivo del producto en la entrada."
+                                title={ayudaThNumero}
                             >
                                 #
                             </th>
                             <th
                                 className={cn(TH, 'text-left')}
-                                title="En la fila de PARTIDA, lo declarado en recepción. En las de producto, la huella (marca + atributos) que produjo la REVISIÓN."
+                                title={ayudaThProducto}
                             >
                                 Producto
                             </th>
                             <th
                                 className={cn(TH, 'w-16')}
-                                title="Piezas DE ESTE PRODUCTO: aprobadas + devueltas. En una partida sin revisar, lo declarado en recepción."
+                                title={ayudaThRecib}
                             >
                                 Recib.
                             </th>
                             <th
                                 className={cn(TH, 'w-32')}
-                                title="Aprobadas + devueltas de ESTE producto, sobre las piezas de esta línea"
+                                title={ayudaThRevisadas}
                             >
                                 Revisadas
                             </th>
                             <th
                                 className={cn(TH, 'w-16')}
-                                title="Piezas aprobadas de este producto (se pagarán)"
+                                title={ayudaThAprob}
                             >
                                 Aprob.
                             </th>
                             <th
                                 className={cn(TH, 'w-24')}
-                                title="Piezas rechazadas de este producto — abre la devolución"
+                                title={ayudaThDev}
                             >
                                 DEV
                             </th>
                             <th
                                 className={cn(TH, 'w-16')}
-                                title="Piezas que faltan por revisar en la PARTIDA: nadie las revisó, así que todavía no tienen huella y no se reparten por línea."
+                                title={ayudaThFaltan}
                             >
                                 Faltan
                             </th>
                             <th
                                 className={cn(TH, 'w-28')}
-                                title="Estado de la PARTIDA en la etapa (sus líneas lo comparten: es el mismo hecho)"
+                                title={ayudaThEstado}
                             >
                                 Estado
                             </th>
@@ -408,7 +549,7 @@ export function PartidasAvance({
                                 // ⭐ MEJORA 34 (usuario) — la fila de PARTIDA lleva DOS puertas con
                                 // etiqueta (`Ver revisión` + `Liberar n`): 112px no las contiene y los
                                 // botones se apretaban. La columna pasa a 240px y el desglose se ensancha
-                                // (el ancho tope subió a 1320 en `PartidasRevision`).
+                                // (el ancho tope lo fija hoy `AvanceRevisionModal`: 1280 medidos).
                                 <th className={cn(TH, 'w-60')}>
                                     <span className="sr-only">Acciones</span>
                                 </th>
@@ -473,7 +614,7 @@ export function PartidasAvance({
                                         <td className="px-2.5 py-2">
                                             <span
                                                 className="text-muted-foreground"
-                                                title="Lo que Recepción declaró (categoría + atributos de recepción). Debajo, lo que la revisión encontró."
+                                                title={ayudaCeldaProductoPadre}
                                             >
                                                 {huellaDeclarada(p.categoria_nombre, p.atributos)}
                                             </span>
@@ -503,7 +644,20 @@ export function PartidasAvance({
                                                     <button
                                                         type="button"
                                                         onClick={() => onVerDev(entrada, p.id)}
-                                                        title={`Ver ${p.dev_cantidad === 1 ? 'la devolución' : `las ${p.dev_cantidad} devoluciones`} de la partida #${p.partida}.`}
+                                                        // ⭐ MEJORA 47 — la ayuda de la fila se resuelve
+                                                        // con `textoAyuda`: lleva el número y la partida
+                                                        // de ESTA fila, y un hook no puede vivir en un `.map()`.
+                                                        title={textoAyuda(
+                                                            'revision.detalle-ver-dev-partida',
+                                                            preferenciasAyudas,
+                                                            {
+                                                                objeto:
+                                                                    p.dev_cantidad === 1
+                                                                        ? 'la devolución'
+                                                                        : `las ${p.dev_cantidad} devoluciones`,
+                                                                partida: p.partida,
+                                                            }
+                                                        )}
                                                         className={cn(
                                                         // ⭐ MEJORA 27 Sep 2026 — `rounded-md`: la DEV es un
                                                         // CONTROL. Misma talla y tono; la FORMA distingue
@@ -575,7 +729,14 @@ export function PartidasAvance({
                                                                   variant="outline"
                                                                   size="sm"
                                                                   onClick={() => onIniciar(p.id)}
-                                                                  title={`Abrir la revisión de la partida #${p.partida}: ${p.restantes} pieza(s) por revisar.`}
+                                                                  title={textoAyuda(
+                                                                      'revision.detalle-revisar-partida',
+                                                                      preferenciasAyudas,
+                                                                      {
+                                                                          partida: p.partida,
+                                                                          n: p.restantes,
+                                                                      }
+                                                                  )}
                                                               >
                                                                   {/* ⭐ MEJORA 30 — «Revisar (n)»: la MISMA
                                                                       cifra de la columna Faltan, en el botón
@@ -594,7 +755,14 @@ export function PartidasAvance({
                                                                 onClick={() =>
                                                                     onLiberar(entrada, p.id)
                                                                 }
-                                                                title={`${liberablesPartida} pieza(s) aprobadas de la partida #${p.partida} (todos sus productos) pueden pasar ya a limpieza.`}
+                                                                title={textoAyuda(
+                                                                    'revision.detalle-liberar-partida',
+                                                                    preferenciasAyudas,
+                                                                    {
+                                                                        n: liberablesPartida,
+                                                                        partida: p.partida,
+                                                                    }
+                                                                )}
                                                             >
                                                                 <PackageCheck className="mr-1 h-3.5 w-3.5" />
                                                                 Liberar {liberablesPartida}
@@ -626,8 +794,16 @@ export function PartidasAvance({
                                                   : undefined
                                         )}
                                         title={
+                                            // ⭐ MEJORA 47 — se cataloga el `title` de una línea que
+                                            // viene de una partida MÚLTIPLE (explica de dónde sale el
+                                            // consecutivo). El de una línea normal («Partida 3») nombra
+                                            // el dato a secas y NO se cataloga.
                                             l.partidaMultiple
-                                                ? `Línea ${l.numero} de la entrada · viene de la partida ${p.partida} declarada`
+                                                ? textoAyuda(
+                                                      'revision.detalle-celda-linea',
+                                                      preferenciasAyudas,
+                                                      { n: l.numero, partida: p.partida }
+                                                  )
                                                 : `Partida ${p.partida}`
                                         }
                                     >
@@ -645,14 +821,32 @@ export function PartidasAvance({
                                         {l.declarada ? (
                                             <span
                                                 className="italic text-muted-foreground/70"
-                                                title={`Declarado en recepción: ${huellaDeclarada(p.categoria_nombre, p.atributos)}`}
+                                                title={textoAyuda(
+                                                    'revision.detalle-celda-producto-hijo',
+                                                    preferenciasAyudas,
+                                                    {
+                                                        huella: huellaDeclarada(
+                                                            p.categoria_nombre,
+                                                            p.atributos
+                                                        ),
+                                                    }
+                                                )}
                                             >
                                                 {huellaDeclarada(p.categoria_nombre, p.atributos)} · sin revisar
                                             </span>
                                         ) : (
                                             <span
                                                 className="font-semibold"
-                                                title={`Declarado en recepción: ${huellaDeclarada(p.categoria_nombre, p.atributos)}`}
+                                                title={textoAyuda(
+                                                    'revision.detalle-celda-producto-hijo',
+                                                    preferenciasAyudas,
+                                                    {
+                                                        huella: huellaDeclarada(
+                                                            p.categoria_nombre,
+                                                            p.atributos
+                                                        ),
+                                                    }
+                                                )}
                                             >
                                                 {l.marcaNombre ?? 'Sin marca'}
                                                 {valoresAtributos(l.atributos) && (
@@ -714,7 +908,21 @@ export function PartidasAvance({
                                                 <button
                                                     type="button"
                                                     onClick={() => onVerDev(entrada, p.id)}
-                                                    title={`Ver ${dev === 1 ? 'la devolución' : `las ${dev} devoluciones`} de ${l.marcaNombre ?? 'este producto'} en la partida #${p.partida}.`}
+                                                    // ⭐ MEJORA 47 — la ayuda de ESTA fila (lleva el
+                                                    // número, la marca y la partida): `textoAyuda`, no
+                                                    // `useAyuda` — un hook no puede vivir en un `.map()`.
+                                                    title={textoAyuda(
+                                                        'revision.detalle-ver-dev',
+                                                        preferenciasAyudas,
+                                                        {
+                                                            objeto:
+                                                                dev === 1
+                                                                    ? 'la devolución'
+                                                                    : `las ${dev} devoluciones`,
+                                                            marca: l.marcaNombre ?? 'este producto',
+                                                            partida: p.partida,
+                                                        }
+                                                    )}
                                                     className={cn(
                                                         // ⭐ MEJORA 27 Sep 2026 — `rounded-md`: la DEV es
                                                         // un CONTROL (la forma distingue control de estado).
@@ -782,8 +990,12 @@ export function PartidasAvance({
                                                                     l.huella?.id_partida_resuelta
                                                                 )
                                                             }
-                                                            title={`${liberables} pieza(s) aprobadas de ESTE producto pueden pasar ya a limpieza, sin esperar al resto de la partida.`}
-                                                        >
+                                                                title={textoAyuda(
+                                                                    'revision.detalle-liberar-producto',
+                                                                    preferenciasAyudas,
+                                                                    { n: liberables }
+                                                                )}
+                                                            >
                                                             <PackageCheck className="mr-1 h-3.5 w-3.5" />
                                                             Liberar {liberables}
                                                         </Button>
@@ -811,7 +1023,14 @@ export function PartidasAvance({
             </div>
 
             {/* ── Timeline de etapas + totales, en UNA línea ─────────────────── */}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            {/* ⭐ 06 Oct 2026 — Z3 (la barra de etapas + el resumen) es `shrink-0`: con el cuerpo
+                scrolleando, el timeline y sus totales siguen a la vista. */}
+            <div
+                className={cn(
+                    'flex flex-wrap items-center gap-x-4 gap-y-1.5',
+                    enModal && 'shrink-0'
+                )}
+            >
                 <Hito etiqueta="Recepción" fecha={entrada.fecha} />
                 <Hito etiqueta="Revisión" fecha={entrada.fecha_fin_rev} />
                 <Hito etiqueta="Acondicionamiento" fecha={entrada.fecha_fin_acond} />

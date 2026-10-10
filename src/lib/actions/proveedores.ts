@@ -13,6 +13,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import {
     proveedorRapidoSchema,
     proveedorSchema,
@@ -134,7 +135,7 @@ function traducirErrorProveedor(codigo: string | undefined, mensaje: string): st
     if (codigo === '23505') return 'Ya existe un registro con ese RFC o código.'
     if (codigo === '23503') return 'El régimen fiscal seleccionado no existe.'
     if (codigo === '42501') return 'No tienes permiso para realizar esta acción.'
-    return mensaje
+    return describirError({ message: mensaje, code: codigo }) ?? mensaje
 }
 
 // ── Listar proveedores (filtros del listado · PLAN §4) ───────────────────────
@@ -164,7 +165,7 @@ export async function listarProveedores(
     }
 
     const { data, error } = await query.order('nombre_comercial', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     const proveedores = ((data ?? []) as unknown as FilaProveedorCruda[]).map(aFila)
     return { success: true, data: proveedores }
@@ -180,7 +181,7 @@ export async function obtenerProveedor(id: string): Promise<RespuestaDato<Provee
         .eq('id', id)
         .maybeSingle()
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     if (!data) return { success: false, error: 'El proveedor no existe.' }
 
     return { success: true, data: aFila(data as unknown as FilaProveedorCruda) }
@@ -207,7 +208,7 @@ export async function crearProveedor(input: ProveedorInput): Promise<RespuestaAc
     if (errFolio || !codigo) {
         return {
             success: false,
-            error: errFolio?.message ?? 'No se pudo generar el código del proveedor.',
+            error: describirError(errFolio) ?? 'No se pudo generar el código del proveedor.',
         }
     }
 
@@ -329,7 +330,7 @@ export async function listarProveedoresActivos(): Promise<RespuestaLista<Proveed
         .eq('es_activo', true)
         .order('nombre_comercial', { ascending: true })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: (data ?? []) as ProveedorOpcion[] }
 }
 
@@ -354,7 +355,7 @@ export async function crearProveedorRapido(
     if (errFolio || !codigo) {
         return {
             success: false,
-            error: errFolio?.message ?? 'No se pudo generar el código del proveedor.',
+            error: describirError(errFolio) ?? 'No se pudo generar el código del proveedor.',
         }
     }
 

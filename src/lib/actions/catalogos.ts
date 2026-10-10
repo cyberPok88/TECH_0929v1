@@ -2,10 +2,11 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import type {
   ImpuestoFila, UnidadMedidaFila, CategoriaFila, CatalogoSimpleFila,
   MarcaComercialFila, MarcaProductoFila, TipoClienteFila, ListaPrecioFila,
-  UbicacionAlmacenFila, VendedorFila,
+  UbicacionAlmacenFila, VendedorFila, FormaPagoFila,
   RespuestaLista,
 } from '@/types/catalogos'
 
@@ -115,7 +116,7 @@ export async function crearImpuesto(input: unknown): Promise<RespuestaAccion> {
     tasa: parsed.data.tasaPorciento / 100,
     es_activo: parsed.data.es_activo,
   })
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -129,14 +130,14 @@ export async function editarImpuesto(id: string, input: unknown): Promise<Respue
     tasa: parsed.data.tasaPorciento / 100,
     es_activo: parsed.data.es_activo,
   }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
 export async function cambiarEstadoImpuesto(id: string, activo: boolean): Promise<RespuestaAccion> {
   const sb = await cliente()
   const { error } = await sb.from('impuestos').update({ es_activo: activo }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -145,6 +146,9 @@ import { unidadMedidaCrearSchema, unidadMedidaEditarSchema,
          canalVentaCrearSchema, canalVentaEditarSchema,
          marcaComercialCrearSchema, marcaComercialEditarSchema,
          marcaProductoCrearSchema, marcaProductoEditarSchema } from '@/lib/validations/catalogos'
+
+// ⭐ ANEXIÓN 09 Oct 2026 — formas de pago SAT (import propio, junto a su sección de verbos)
+import { formaPagoCrearSchema, formaPagoEditarSchema } from '@/lib/validations/catalogos'
 
 function primerError(r: { success: boolean; error?: unknown }) {
   if (r.success) return null
@@ -160,7 +164,7 @@ export async function crearUnidadMedida(input: unknown): Promise<RespuestaAccion
     clave: parsed.data.clave, nombre: parsed.data.nombre, abreviatura: parsed.data.abreviatura,
     clave_sat: parsed.data.clave_sat || null, es_activo: parsed.data.es_activo,
   })
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function editarUnidadMedida(id: string, input: unknown): Promise<RespuestaAccion> {
@@ -170,12 +174,12 @@ export async function editarUnidadMedida(id: string, input: unknown): Promise<Re
   const { error } = await sb.from('unidades_medida').update({
     nombre: parsed.data.nombre, abreviatura: parsed.data.abreviatura, clave_sat: parsed.data.clave_sat || null,
   }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function cambiarEstadoUnidadMedida(id: string, activo: boolean): Promise<RespuestaAccion> {
   const sb = await cliente(); const { error } = await sb.from('unidades_medida').update({ es_activo: activo }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -186,7 +190,7 @@ export async function crearCanalVenta(input: unknown): Promise<RespuestaAccion> 
   const sb = await cliente(); const { error } = await sb.from('canales_venta').insert({
     clave: parsed.data.clave, nombre: parsed.data.nombre, es_activo: parsed.data.es_activo,
   })
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function editarCanalVenta(id: string, input: unknown): Promise<RespuestaAccion> {
@@ -195,12 +199,12 @@ export async function editarCanalVenta(id: string, input: unknown): Promise<Resp
   const sb = await cliente(); const { error } = await sb.from('canales_venta').update({
     nombre: parsed.data.nombre, es_activo: parsed.data.es_activo,
   }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function cambiarEstadoCanalVenta(id: string, activo: boolean): Promise<RespuestaAccion> {
   const sb = await cliente(); const { error } = await sb.from('canales_venta').update({ es_activo: activo }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -213,7 +217,7 @@ export async function crearMarcaComercial(input: unknown): Promise<RespuestaAcci
     color_hex: parsed.data.color_hex || null, descripcion: parsed.data.descripcion || null,
     es_activa: parsed.data.es_activa,
   })
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function editarMarcaComercial(id: string, input: unknown): Promise<RespuestaAccion> {
@@ -224,12 +228,12 @@ export async function editarMarcaComercial(id: string, input: unknown): Promise<
     color_hex: parsed.data.color_hex || null, descripcion: parsed.data.descripcion || null,
     es_activa: parsed.data.es_activa,
   }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function cambiarEstadoMarcaComercial(id: string, activa: boolean): Promise<RespuestaAccion> {
   const sb = await cliente(); const { error } = await sb.from('marcas_comerciales').update({ es_activa: activa }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -240,7 +244,7 @@ export async function crearMarcaProducto(input: unknown): Promise<RespuestaAccio
   const sb = await cliente(); const { error } = await sb.from('marcas_producto').insert({
     nombre: parsed.data.nombre, es_activo: parsed.data.es_activo,
   })
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function editarMarcaProducto(id: string, input: unknown): Promise<RespuestaAccion> {
@@ -249,12 +253,12 @@ export async function editarMarcaProducto(id: string, input: unknown): Promise<R
   const sb = await cliente(); const { error } = await sb.from('marcas_producto').update({
     nombre: parsed.data.nombre, es_activo: parsed.data.es_activo,
   }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function cambiarEstadoMarcaProducto(id: string, activo: boolean): Promise<RespuestaAccion> {
   const sb = await cliente(); const { error } = await sb.from('marcas_producto').update({ es_activo: activo }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -273,7 +277,7 @@ export async function crearTipoCliente(input: unknown): Promise<RespuestaAccion>
     descripcion: parsed.data.descripcion || null, orden: parsed.data.orden,
     es_activo: parsed.data.es_activo,
   })
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function editarTipoCliente(id: string, input: unknown): Promise<RespuestaAccion> {
@@ -285,12 +289,12 @@ export async function editarTipoCliente(id: string, input: unknown): Promise<Res
     descripcion: parsed.data.descripcion || null, orden: parsed.data.orden,
     es_activo: parsed.data.es_activo,
   }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function cambiarEstadoTipoCliente(id: string, activo: boolean): Promise<RespuestaAccion> {
   const sb = await cliente(); const { error } = await sb.from('tipos_cliente').update({ es_activo: activo }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -313,7 +317,7 @@ export async function crearListaPrecio(input: unknown): Promise<RespuestaAccion>
     tipo_ajuste: parsed.data.tipoAjuste,
     es_lista_default: parsed.data.es_lista_default, es_activo: parsed.data.es_activo,
   })
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function editarListaPrecio(id: string, input: unknown): Promise<RespuestaAccion> {
@@ -331,7 +335,7 @@ export async function editarListaPrecio(id: string, input: unknown): Promise<Res
     tipo_ajuste: parsed.data.tipoAjuste,
     es_lista_default: parsed.data.es_lista_default, es_activo: parsed.data.es_activo,
   }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 export async function cambiarEstadoListaPrecio(id: string, activo: boolean): Promise<RespuestaAccion> {
@@ -341,7 +345,7 @@ export async function cambiarEstadoListaPrecio(id: string, activo: boolean): Pro
     if (fila?.es_lista_default) return { success: false, error: 'No se puede desactivar la lista default: marca primero otra como default' }
   }
   const { error } = await sb.from('listas_precios').update({ es_activo: activo }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -379,7 +383,7 @@ export async function crearCategoria(input: unknown): Promise<RespuestaAccion> {
     esquema_atributos: jsonArray(input, 'esquema_atributos'),
     es_activo: booleano(input, 'es_activo'),
   })
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -415,7 +419,7 @@ export async function editarCategoria(id: string, input: unknown): Promise<Respu
     esquema_atributos: jsonArray(input, 'esquema_atributos'),
     es_activo: booleano(input, 'es_activo'),
   }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -427,7 +431,7 @@ export async function cambiarEstadoCategoria(id: string, activo: boolean): Promi
     if (hijos && hijos.length > 0) return { success: false, error: 'Desactiva primero sus subcategorías' }
   }
   const { error } = await sb.from('categorias_producto').update({ es_activo: activo }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }
 
@@ -467,6 +471,45 @@ export async function editarUbicacion(id: string, input: unknown): Promise<Respu
 }
 export async function cambiarEstadoUbicacion(id: string, activo: boolean): Promise<RespuestaAccion> {
   const sb = await cliente(); const { error } = await sb.from('ubicaciones_almacen').update({ es_activo: activo }).eq('id', id)
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: describirError(error) }
+  return { success: true }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⭐ ANEXIÓN 09 Oct 2026 — FORMAS DE PAGO SAT (la pide 1.9 Cobros)
+//
+// ⚠️ NO hay SQL en esta anexión: la tabla `sat_formas_pago` la creó y sembró la
+//    fundación (0.4) y su RLS **ya gobierna la escritura** (`es_administrador()`), el
+//    MISMO patrón que `impuestos`. Lo que faltaba era la UI: el mapa de 1.0 la difería
+//    a «V2 / Clientes 1.3» y **1.9 la necesita como FK obligatoria del método**.
+// ⚠️ La columna etiqueta es `descripcion` (no `nombre`) — nombre literal de la tabla.
+// ═══════════════════════════════════════════════════════════════════════════════
+export async function listarFormasPago(): Promise<RespuestaLista<FormaPagoFila>> {
+  const sb = await cliente()
+  const { data, error } = await sb.from('sat_formas_pago').select('*').order('clave', { ascending: true })
+  if (error) return { success: false as never, data: [] } // nunca throw
+  return { success: true, data: (data ?? []) as FormaPagoFila[] }
+}
+export async function crearFormaPago(input: unknown): Promise<RespuestaAccion> {
+  const parsed = formaPagoCrearSchema.safeParse(input)
+  if (!parsed.success) return { success: false, error: primerError(parsed) ?? 'Datos inválidos' }
+  const sb = await cliente(); const { error } = await sb.from('sat_formas_pago').insert({
+    clave: parsed.data.clave, descripcion: parsed.data.descripcion, es_activo: parsed.data.es_activo,
+  })
+  if (error) return { success: false, error: describirError(error) }
+  return { success: true }
+}
+export async function editarFormaPago(id: string, input: unknown): Promise<RespuestaAccion> {
+  const parsed = formaPagoEditarSchema.safeParse(input)
+  if (!parsed.success) return { success: false, error: primerError(parsed) ?? 'Datos inválidos' }
+  const sb = await cliente(); const { error } = await sb.from('sat_formas_pago').update({
+    descripcion: parsed.data.descripcion, es_activo: parsed.data.es_activo,
+  }).eq('id', id)
+  if (error) return { success: false, error: describirError(error) }
+  return { success: true }
+}
+export async function cambiarEstadoFormaPago(id: string, activo: boolean): Promise<RespuestaAccion> {
+  const sb = await cliente(); const { error } = await sb.from('sat_formas_pago').update({ es_activo: activo }).eq('id', id)
+  if (error) return { success: false, error: describirError(error) }
   return { success: true }
 }

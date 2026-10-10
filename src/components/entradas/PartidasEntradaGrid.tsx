@@ -32,7 +32,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import type { CategoriaEntrada, PartidaEntradaForm } from '@/types/entradas'
 
-function nuevaPartida(): PartidaEntradaForm {
+function nuevaPartida(llevaNs = true): PartidaEntradaForm {
     return {
         id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         id_categoria: '',
@@ -48,8 +48,13 @@ function nuevaPartida(): PartidaEntradaForm {
          *
          * ⚠️ FIX 3 (05 Oct 2026) — el **control** ya no se muestra; el **dato** sigue viajando, y las
          * dos partes pueden corregirlo en su propio momento (la puerta lo apaga desde el wizard).
+         *
+         * ⭐ MEJORA 52 (07 Oct 2026) — **el default depende del FLUJO** (decisión del dueño):
+         * flujo **NO nuevo** ⇒ `true` (la mercancía entra a revisión pieza por pieza y se le toma el
+         * NS) · flujo **nuevo** (Camino B) ⇒ **`false`**, porque ese camino **no tiene revisión** y
+         * nadie capturaría el serial. Lo pasa `EntradaModal` como `llevaNsPorDefecto`.
          */
-        lleva_ns: true,
+        lleva_ns: llevaNs,
     }
 }
 
@@ -122,6 +127,12 @@ interface PartidasEntradaGridProps {
      * suelta al pie. Las claves las arma `EntradaModal` validando con el MISMO schema que la Server Action.
      */
     errores?: Record<string, string>
+    /**
+     * ⭐ MEJORA 52 — **el `lleva_ns` con el que NACE una partida nueva.** `true` (default) para el
+     * flujo NO nuevo; `false` para el flujo nuevo (Camino B), que no tiene revisión y por lo tanto
+     * nadie capturaría el serial. Decisión del dueño, 07 Oct 2026.
+     */
+    llevaNsPorDefecto?: boolean
 }
 
 export function PartidasEntradaGrid({
@@ -130,6 +141,7 @@ export function PartidasEntradaGrid({
     onChange,
     disabled = false,
     errores = {},
+    llevaNsPorDefecto = true,
 }: PartidasEntradaGridProps) {
     const categoriaDe = (id: string) => categorias.find((c) => c.id === id) ?? null
     // ⭐ Campos que la RECEPCIÓN muestra: los `en_entrada` + los `derivado_de`
@@ -159,7 +171,7 @@ export function PartidasEntradaGrid({
     const actualizar = (i: number, patch: Partial<PartidaEntradaForm>) =>
         onChange(partidas.map((p, idx) => (idx === i ? { ...p, ...patch } : p)))
     const quitar = (i: number) => onChange(partidas.filter((_, idx) => idx !== i))
-    const agregar = () => onChange([...partidas, nuevaPartida()])
+    const agregar = () => onChange([...partidas, nuevaPartida(llevaNsPorDefecto)])
 
     /** ⭐ El paso de cantidad: el gesto más repetido. */
     const paso = (i: number, delta: number) => {

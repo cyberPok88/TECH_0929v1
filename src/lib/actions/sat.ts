@@ -9,6 +9,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import type { RespuestaLista } from '@/types/proveedores'
 
 /** Opción del Select de régimen fiscal (label = descripción SAT). */
@@ -29,6 +30,6 @@ export async function listarRegimenesFiscalesActivos(): Promise<
         .eq('es_activo', true)
         .order('clave', { ascending: true })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true, data: (data ?? []) as RegimenFiscalOpcion[] }
 }

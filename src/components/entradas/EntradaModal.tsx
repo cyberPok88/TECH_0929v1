@@ -202,7 +202,17 @@ export function EntradaModal({ open, onOpenChange, modo, entrada = null, onGuard
 
     /** Elegir flujo: **es lo que abre el formulario** (fix 1). */
     const elegirFlujo = (nueva: boolean) => {
-        actualizar('es_sin_revision', nueva)
+        /**
+         * ⭐ MEJORA 52 (07 Oct 2026, decisión del dueño) — **el `lleva_ns` SIGUE AL FLUJO**:
+         * el flujo NO nuevo revisa pieza por pieza y ahí se toma el NS ⇒ **encendido**; el flujo
+         * nuevo (Camino B) **no tiene revisión** ⇒ **apagado**, porque nadie capturaría el serial.
+         * Se aplica también a las partidas YA capturadas: volver atrás no deja banderas viejas.
+         */
+        setForm((prev) => ({
+            ...prev,
+            es_sin_revision: nueva,
+            partidas: prev.partidas.map((p) => ({ ...p, lleva_ns: !nueva })),
+        }))
         setErrores({})
         setPaso('formulario')
     }
@@ -459,6 +469,7 @@ export function EntradaModal({ open, onOpenChange, modo, entrada = null, onGuard
                                             onChange={(partidas) => actualizar('partidas', partidas)}
                                             disabled={cargando}
                                             errores={errores}
+                                            llevaNsPorDefecto={!esNueva}
                                         />
                                     )}
                                 </div>

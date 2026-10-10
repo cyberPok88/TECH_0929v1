@@ -23,6 +23,46 @@ import type { LecturaEntrada } from '@/types/entradas'
 /** Dirección del agente en la PC del puesto. */
 export const URL_AGENTE = 'http://127.0.0.1:8788'
 
+/**
+ * ⭐ 08 Oct 2026 — **LA VERSIÓN MÍNIMA DEL AGENTE, y por qué la app la necesita.**
+ *
+ * Medido el 08 Oct 2026: el `.exe` del puesto se quedó **viejo** y nadie se enteró. Llevaba
+ * 17 de 18 reglas de marca (una marca salía vacía y el técnico la completaba a mano, que es
+ * un síntoma que se lee como «el disco es raro», no como «el agente es viejo») y el
+ * `preparar-discos.ps1` en **MBR** con la fuente ya en **GPT**. Y la app **toleraba** al
+ * agente viejo en silencio (`normalizarLectura` deduce lo que el agente no manda) ⇒ la
+ * deriva era invisible desde los dos lados.
+ *
+ * Desde el agente **1.1.0** la versión viaja en `GET /api/discos` (`version`) y en
+ * `/api/salud`. Acá se declara cuál es la mínima y el panel avisa. **Un agente que NO manda
+ * versión es anterior a esta regla** ⇒ se considera viejo: es exactamente el caso que hay
+ * que hacer visible.
+ *
+ * ⚠️ SI SUBÍS `VERSION` EN `spikes/smart-puesto-revision/agente.py`, subí TAMBIÉN esto — o el
+ * aviso deja de aparecer y volvemos al silencio.
+ */
+export const VERSION_MINIMA_AGENTE = '1.2.0'
+
+function partesDeVersion(v: string): number[] {
+    return v.split('.').map((n) => {
+        const x = Number.parseInt(n, 10)
+        return Number.isNaN(x) ? 0 : x
+    })
+}
+
+/** ¿Esta versión de agente es anterior a `VERSION_MINIMA_AGENTE`? (`null` = sí) */
+export function agenteDesactualizado(version: string | null | undefined): boolean {
+    if (!version) return true
+    const a = partesDeVersion(version)
+    const b = partesDeVersion(VERSION_MINIMA_AGENTE)
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        const x = a[i] ?? 0
+        const y = b[i] ?? 0
+        if (x !== y) return x < y
+    }
+    return false
+}
+
 /** Cuánto esperar al agente (leer un disco tarda ~15 s: lanza CrystalDiskInfo). */
 const MS_ESPERA = 60_000
 
@@ -128,6 +168,15 @@ export interface LecturaDiscos {
     discos_no_leidos: { disco_fisico: number | null; nombre: string | null }[]
     /** Avisos del agente (p. ej. «usando la fórmula propia»). */
     avisos: string[]
+    /**
+     * ⭐ 08 Oct 2026 — la versión del agente que respondió. `null` = **no la manda** ⇒ es
+     * anterior al agente 1.1.0 (ver `agenteDesactualizado`). Viaja también en la evidencia.
+     */
+    version_agente: string | null
+    /** La fecha de esa versión (informativa). */
+    version_fecha_agente: string | null
+    /** `true` si el agente es anterior a `VERSION_MINIMA_AGENTE`. Lo pinta el panel. */
+    agente_version_anterior: boolean
     error?: string
 }
 
@@ -183,6 +232,9 @@ export function normalizarLectura(d: Record<string, unknown>): LecturaDiscos {
         discos_vistos: typeof d.discos_vistos === 'number' ? d.discos_vistos : null,
         discos_esperados: typeof d.discos_esperados === 'number' ? d.discos_esperados : null,
         discos_no_leidos: noLeidos,
+        version_agente: typeof d.version === 'string' ? d.version : null,
+        version_fecha_agente: typeof d.version_fecha === 'string' ? d.version_fecha : null,
+        agente_version_anterior: agenteDesactualizado(typeof d.version === 'string' ? d.version : null),
         discos: ordenarPorBahia(discos.map((x) => normalizar(x))),
     }
 }
@@ -198,6 +250,7 @@ export async function leerDiscos(opts?: { incluirSistema?: boolean }): Promise<L
         hdsentinel_atraso_segundos: null, avisos: [],
         lectura_incompleta: null, discos_vistos: null, discos_esperados: null,
         discos_no_leidos: [],
+        version_agente: null, version_fecha_agente: null, agente_version_anterior: false,
     }
     const corte = new AbortController()
     const reloj = setTimeout(() => corte.abort(), MS_ESPERA)
@@ -265,7 +318,7 @@ export function normalizar(x: Record<string, unknown>): DiscoLeido {
         serial: (x.serial as string | null) ?? null,
         modelo: (x.modelo as string | null) ?? null,
         marca: (x.marca as string | null) ?? null,
-        marca_confianza: (x.marca_confianza as string | null) ?? null,
+        marca_confianza: confianzaMarcaValida(x.marca_confianza),
         bahia: rotuloBahia(x, u),
         firmware: (x.firmware as string | null) ?? null,
         horas_uso: (x.horas_uso as number | null) ?? null,
@@ -300,10 +353,76 @@ export function normalizar(x: Record<string, unknown>): DiscoLeido {
 }
 
 /**
+ * ⭐ MEJORA 52 (07 Oct 2026) — **la confianza de la marca, normalizada en el BORDE.**
+ *
+ * `lecturas_disco.marca_confianza` tiene un `CHECK` que admite **solo** `alta` · `media` · `baja` ·
+ * `nula`. El agente hoy manda exactamente esos 4 (`REGLAS_MARCA` de `agente.py`), pero si alguna vez
+ * mandara otra cosa —un número, `high`, un espacio de más— el `INSERT` del turno **entero** fallaría
+ * por violación de `CHECK`, y el técnico perdería la ronda. Se normaliza acá, una sola vez.
+ * Un valor que no se reconoce **no se inventa**: queda `null` (desconocido), que es lo honesto.
+ */
+const CONFIANZAS_MARCA = ['alta', 'media', 'baja', 'nula'] as const
+
+export function confianzaMarcaValida(v: unknown): string | null {
+    const t = typeof v === 'string' ? v.trim().toLowerCase() : ''
+    return (CONFIANZAS_MARCA as readonly string[]).includes(t) ? t : null
+}
+
+/**
+ * ⭐ MEJORA 52 — **el `{ contexto }` de la evidencia**: lo que viene en la RESPUESTA del agente y
+ * no en el disco. Antes se perdía entero (y con él el «esta salud es de hace 3 días»).
+ */
+export function contextoDeRespuesta(r: LecturaDiscos): Record<string, unknown> {
+    return {
+        motor: r.motor,
+        hdsentinel: r.hdsentinel,
+        hdsentinel_atraso_segundos: r.hdsentinel_atraso_segundos,
+        lectura_incompleta: r.lectura_incompleta,
+        discos_vistos: r.discos_vistos,
+        discos_esperados: r.discos_esperados,
+        discos_no_leidos: r.discos_no_leidos,
+        omitidos: r.omitidos,
+        avisos: r.avisos,
+        // ⭐ 08 Oct 2026 — QUÉ VERSIÓN DEL AGENTE produjo esta lectura. Va en la evidencia:
+        //   cuando dentro de tres meses un NS o una marca no cuadren, esto dice si el dato
+        //   salió de un agente viejo sin tener que adivinar por el síntoma.
+        version_agente: r.version_agente,
+        version_fecha_agente: r.version_fecha_agente,
+    }
+}
+
+/**
+ * ⭐ MEJORA 52 — **las 8 mediciones que NO deciden** y por eso viven en el json y no en columna.
+ * Regla del reparto: *si el sistema lo CONSULTA o lo CRUZA → columna; si solo se MUESTRA o se
+ * audita → json*. (`apto_para_decidir` y `horas_uso` **no** están acá a propósito: el primero tiene
+ * índice parcial y la segunda **valúa** ⇒ hay que poder filtrar/ordenar por ella.)
+ */
+export function medicionesDeDisco(d: DiscoLeido): Record<string, unknown> {
+    return {
+        encendidos: d.encendidos,
+        temperatura_c: d.temperatura_c,
+        salud_en_falla: false,
+        salud_motivos: d.salud.motivos,
+        sectores_reasignados: d.sectores_reasignados,
+        sectores_pendientes: d.sectores_pendientes,
+        sectores_no_corregibles: d.sectores_no_corregibles,
+        errores_crc: d.errores_crc,
+    }
+}
+
+/**
  * Del disco leído a la **lectura que viaja al servidor** (la evidencia de la revisión).
  * Se llama en el momento de agregar la pieza: el disco que se acaba de leer ES esa pieza.
+ *
+ * ⭐ MEJORA 52 — `contexto` es lo que viene de la RESPUESTA del agente (no del disco): si no se
+ * pasa, la evidencia queda con `payload` + `mediciones` y `contexto: null` (nunca se inventa).
  */
-export function aLectura(d: DiscoLeido, idPartidaEntrada: string, idMarca?: string | null): LecturaEntrada {
+export function aLectura(
+    d: DiscoLeido,
+    idPartidaEntrada: string,
+    idMarca?: string | null,
+    contexto?: Record<string, unknown> | null
+): LecturaEntrada {
     return {
         ns: d.serial ?? '',
         ns_windows: d.serial_windows,
@@ -336,6 +455,14 @@ export function aLectura(d: DiscoLeido, idPartidaEntrada: string, idMarca?: stri
         errores_crc: d.errores_crc,
         motor: d.motor,
         smart_raw: d.smart,
+        // ⭐ MEJORA 52 — lo que el agente SUGIRIÓ (antes se tiraba) y la evidencia completa.
+        marca_detectada: d.marca,
+        marca_confianza: confianzaMarcaValida(d.marca_confianza),
+        lectura_cruda: {
+            payload: d as unknown as Record<string, unknown>,
+            mediciones: medicionesDeDisco(d),
+            contexto: contexto ?? null,
+        },
     }
 }
 
@@ -578,6 +705,42 @@ export function capacidadOpcion(gb: number | null | undefined, opciones: string[
     return mejor
 }
 
+/**
+ * ⭐ MEJORA 52 (07 Oct 2026) — **¿ESTA PIEZA ES DE LO QUE DICE LA ENTRADA?**
+ *
+ * El caso que lo pidió, del dueño: *«recibe 50 discos, el revisa que sean los que dice el proveedor…
+ * pueden decir que son de **1TB** pero vienen 2 de **500GB**, **por eso se revisa**»*. Y su prueba viva:
+ * declaró **1TB** y el lector midió **2000.3 GB**.
+ *
+ * **Qué hace:** compara la capacidad que el disco **MIDIÓ** contra la que la partida **DECLARÓ**, y
+ * devuelve el desvío cuando **no coinciden**. `null` = coinciden (o no se puede comparar).
+ *
+ * ⚠️ **Con TOLERANCIA, no por igualdad de texto.** Un disco «de 2 TB» reporta `2000.3 GB`, y uno «de
+ * 1 TB» reporta `1000.2 GB`: **nunca dan el número redondo**. Comparar las cadenas («2000.3 GB» contra
+ * «2TB») marcaría TODO como desvío. El 10 % de margen absorbe la diferencia comercial y **sí** caza los
+ * casos reales: 1TB↔2TB es un **100 %** de desvío, y 1TB↔1.5TB un **50 %**.
+ *
+ * ⚠️ Esto **avisa**, no corrige: la huella ya la corrige el disco (`atributosDesdeDisco`). El aviso
+ * existe para que el técnico **sepa** que la pieza no es de esa partida — y eso es lo que dispara la
+ * **reclasificación** (que Recepción valida).
+ */
+export function desvioDeCapacidad(
+    capacidadTexto: string | null | undefined,
+    capacidadDeclarada: string | null | undefined,
+    opciones: string[] = [],
+    tolerancia = 0.1
+): { medida: string; declarada: string } | null {
+    const gbMedido = capacidadEnGb(capacidadTexto ?? null)
+    const gbDeclarado = capacidadEnGb(capacidadDeclarada ?? null)
+    if (gbMedido === null || gbDeclarado === null || gbDeclarado <= 0) return null
+    if (Math.abs(gbMedido - gbDeclarado) / gbDeclarado <= tolerancia) return null
+    return {
+        // La etiqueta más cercana del esquema («2TB»); si no hay lista, el número tal como vino.
+        medida: capacidadOpcion(gbMedido, opciones) ?? `${Math.round(gbMedido)} GB`,
+        declarada: (capacidadDeclarada ?? '').trim(),
+    }
+}
+
 /** 5425 -> '5400' · 7200 -> '7200' (la opción más cercana del esquema). */
 export function rpmOpcion(rpm: number | null | undefined, opciones: string[]): string | null {
     if (!rpm || opciones.length === 0) return null
@@ -618,10 +781,26 @@ export function atributosDesdeDisco(disco: DiscoLeido, esquema: AtributoEsquema[
     const out: Record<string, string> = {}
     const gb = capacidadEnGb(disco.capacidad_texto)
     for (const a of esquema) {
-        // Los de RECEPCIÓN no se tocan (ya se capturaron y son la base de la huella).
-        // ⚠ Un `valor_default` SÍ se puede corregir: el disco sabe el dato real (uno de
-        // 5425 rpm no es de 7200). El default solo debe usarse si la lectura no dijo nada.
-        if (!a.en_huella || a.en_entrada) continue
+        /**
+         * ⭐ MEJORA 52 (07 Oct 2026, decisión del dueño) — **LA MEDICIÓN MANDA SOBRE LO DECLARADO.**
+         *
+         * Antes el guard era `if (!a.en_huella || a.en_entrada) continue`: los atributos capturados en
+         * la puerta **no se tocaban** («ya se capturaron y son la base de la huella»). Eso dejaba un
+         * defecto **con consecuencia en el stock**: `capacidad` es `en_entrada` en las 4 categorías ⇒
+         * **el disco nunca la corregía** y un disco de **500 GB declarado como 1 TB** se registraba con
+         * `capacidad=1TB` ⇒ Almacén resolvía un **SKU de 1 TB**. Silencioso e irreversible.
+         *
+         * El dueño lo dijo con todas las letras: *«la recepción es soft: **ligera**, no poco fiable;
+         * revisar que sean los que dice el proveedor es **casi su única tarea**»*. Y la casa ya tenía
+         * el criterio escrito para los `valor_default`: *«el disco sabe el dato real»*.
+         *
+         * ⇒ Ahora la puerta **declara la base** y la medición **la corrige**: el guard solo exige que el
+         * atributo **sea identidad** (`en_huella`). Lo que el disco NO sabe (tipo, bus, tamaño…) no se
+         * toca — el `switch` de abajo solo mapea lo que la lectura puede probar (`capacidad`, `rpm`,
+         * `interface`); todo lo demás cae al `default: null` y lo decide el técnico.
+         * ⚠️ Y `rpm`, al salir de `en_huella`, ya no entra por acá: su casa es `lecturas_disco.rpm`.
+         */
+        if (!a.en_huella) continue
         const opciones = a.opciones ?? []
         let v: string | null = null
         switch (a.clave) {

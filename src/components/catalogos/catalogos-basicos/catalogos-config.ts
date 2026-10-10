@@ -10,6 +10,8 @@ import {
   listarTiposCliente, crearTipoCliente, editarTipoCliente, cambiarEstadoTipoCliente,
   listarListasPrecio, crearListaPrecio, editarListaPrecio, cambiarEstadoListaPrecio,
   listarUbicacionesAlmacen, crearUbicacion, editarUbicacion, cambiarEstadoUbicacion,
+  // ⭐ ANEXIÓN 09 Oct 2026 — formas de pago SAT (la pide 1.9 Cobros)
+  listarFormasPago, crearFormaPago, editarFormaPago, cambiarEstadoFormaPago,
 } from '@/lib/actions/catalogos'
 import { TIPOS_IMPUESTO } from '@/lib/validations/catalogos'
 
@@ -322,6 +324,42 @@ const ubicacionesAlmacenConfig: CatalogoConfig = {
   acciones: { crear: crearUbicacion, editar: editarUbicacion, toggle: cambiarEstadoUbicacion },
 }
 
+/**
+ * ⭐ ANEXIÓN 09 Oct 2026 — FORMAS DE PAGO SAT (la pide **1.9 Cobros**).
+ *
+ * ⚠️ **Por qué la etiqueta es `descripcion` y no `nombre`:** así se llama la columna en la
+ *    tabla de la fundación (0.4) y **el nombre es contrato literal** (regla 4 del proyecto).
+ * ⚠️ **Su escritura la gobierna la RLS, no el hub**: `sat_formas_pago` exige
+ *    `es_administrador()` para `INSERT`/`UPDATE`/`DELETE` (medido · el MISMO patrón que
+ *    `impuestos`) ⇒ un usuario no administrador **ve** las claves y **no** las edita.
+ * ⭐ La `clave` es el código del SAT (`01` · `02` · … · `99`): se captura **solo al crear**
+ *    (es la FK que 1.9 usará para el método del cobro; cambiarla rompería los cobros hechos).
+ */
+const formasPagoConfig: CatalogoConfig = {
+  clave: 'formas_pago',
+  tituloSingular: 'forma de pago',
+  tituloPlural: 'formas de pago',
+  listar: listarFormasPago as CatalogoConfig['listar'],
+  columnas: [
+    { key: 'clave', label: 'Clave SAT' },
+    { key: 'descripcion', label: 'Descripción' },
+    activaColumna,
+  ],
+  campos: [
+    { name: 'clave', label: 'Clave SAT', tipo: 'text', soloCrear: true, placeholder: '01' },
+    { name: 'descripcion', label: 'Descripción', tipo: 'text' },
+    { name: 'es_activo', label: 'Activo', tipo: 'switch' },
+  ],
+  campoActivo: 'es_activo',
+  buscarEn: ['clave', 'descripcion'],
+  formDesdeRegistro: (f) => ({
+    clave: String(f.clave ?? ''),
+    descripcion: String(f.descripcion ?? ''),
+    es_activo: Boolean(f.es_activo),
+  }),
+  acciones: { crear: crearFormaPago, editar: editarFormaPago, toggle: cambiarEstadoFormaPago },
+}
+
 const configs: Partial<Record<ClaveTabCatalogo, CatalogoConfig>> = {
   impuestos: impuestosConfig,
   unidades_medida: unidadesMedidaConfig,
@@ -331,6 +369,7 @@ const configs: Partial<Record<ClaveTabCatalogo, CatalogoConfig>> = {
   tipos_cliente: tiposClienteConfig,
   listas_precios: listasPrecioConfig,
   ubicaciones_almacen: ubicacionesAlmacenConfig,
+  formas_pago: formasPagoConfig,
   // P6 categorías: custom (árbol + editor de esquema) · P8 vendedores: solo lectura
 }
 

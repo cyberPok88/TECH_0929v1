@@ -38,6 +38,7 @@ import { Button } from '@/components/ui/button'
 import { usePageConfig } from '@/hooks/usePageConfig'
 import { useCanAction } from '@/hooks/useCanAction'
 import { listarBandejas, listarEntradas } from '@/lib/actions/entradas'
+import { useContadorEtapa } from '@/lib/stores/avisos-entradas-store'
 import type { BandejaLiberada, Entrada, EstadoEntrada, EstadoTanda } from '@/types/entradas'
 import { FILTROS_ENTRADAS_DEFAULT } from '@/components/entradas/RecepcionFilters'
 import { CotejoAltaModal } from '@/components/entradas/alta/CotejoAltaModal'
@@ -198,6 +199,14 @@ export function AltaCatalogo() {
 
     const puedeAprobar = useCanAction(RUTA, 'aprobar')
 
+    /**
+     * ⭐ MEJORA 53 (09 Oct 2026) — el puesto de Almacén se despierta solo. Trabajo nuevo llega
+     * por las DOS puertas que ya pinta esta pantalla: la **tanda entregada**
+     * (`liberaciones_entrada` → `en_almacen`) y el **documento** que llegó a `en_almacen`.
+     * El contador lo publica `AvisosEntradas` y entra en las dependencias de los dos efectos.
+     */
+    const avisoAlmacen = useContadorEtapa('almacen')
+
     // Las TANDAS entregadas por acondicionamiento (las hijas).
     useEffect(() => {
         let activo = true
@@ -214,7 +223,7 @@ export function AltaCatalogo() {
         return () => {
             activo = false
         }
-    }, [])
+    }, [avisoAlmacen])
 
     // Los DOCUMENTOS cuyo saldo todavía hay que cotejar (el padre sin tandas).
     useEffect(() => {
@@ -236,7 +245,7 @@ export function AltaCatalogo() {
         return () => {
             activo = false
         }
-    }, [])
+    }, [avisoAlmacen])
 
     const recargar = useCallback(async () => {
         setEstadoBandejas('loading')

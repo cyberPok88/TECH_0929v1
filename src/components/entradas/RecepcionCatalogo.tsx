@@ -19,6 +19,7 @@ import { useCanAction } from '@/hooks/useCanAction'
 import { useAyuda } from '@/components/ui/Ayuda'
 import type { ToolbarAction } from '@/types/shell'
 import { listarEntradas, listarPartidasEntrada } from '@/lib/actions/entradas'
+import { useContadorEtapa } from '@/lib/stores/avisos-entradas-store'
 import type { Entrada, FiltrosEntradas, PartidaEntrada } from '@/types/entradas'
 import { RecepcionFilters, FILTROS_RECEPCION_DEFAULT, hayFiltrosRecepcion } from '@/components/entradas/RecepcionFilters'
 import { EntradaModal } from '@/components/entradas/EntradaModal'
@@ -113,6 +114,11 @@ export function RecepcionCatalogo() {
         folio: expandida?.folio ?? '',
     })
 
+    // ⭐ MEJORA 53 (09 Oct 2026) — la cola se despierta sola cuando la revisión cierra una
+    // entrada (`revisada_sin_dev` · `con_dev`): eso es trabajo de ESTA etapa. El contador lo
+    // publica `AvisosEntradas` (Realtime) y entra en las dependencias del efecto de carga.
+    const avisoRecepcion = useContadorEtapa('recepcion')
+
     useEffect(() => {
         let activo = true
         void listarEntradas(filtros, pagina, tamano).then((res) => {
@@ -128,7 +134,7 @@ export function RecepcionCatalogo() {
         return () => {
             activo = false
         }
-    }, [filtros, pagina, tamano])
+    }, [filtros, pagina, tamano, avisoRecepcion])
 
     const recargar = useCallback(async () => {
         setEstadoTabla('loading')

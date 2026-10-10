@@ -12,6 +12,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { describirError } from '@/lib/utils/errores'
 import { rolCrearSchema, rolEditarSchema } from '@/lib/validations/roles'
 import type { RolCrearInput, RolEditarInput } from '@/lib/validations/roles'
 import { PERMISOS_SEMILLA, ACCIONES_EDITOR } from '@/types/roles'
@@ -52,7 +53,7 @@ interface FilaPermisoCruda {
 function traducirErrorRol(codigo: string | undefined, mensaje: string): string {
     if (codigo === '23505') return 'Ya existe un rol con esa clave.'
     if (codigo === '23514') return 'El nivel jerárquico debe ser mayor que 0.'
-    return mensaje
+    return describirError({ message: mensaje, code: codigo }) ?? mensaje
 }
 
 // ── Listar roles ─────────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ export async function listarRoles(filtros: FiltrosRoles): Promise<RespuestaLista
     }
 
     const { data, error } = await query.order('nivel_jerarquico', { ascending: true })
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     return { success: true, data: (data ?? []) as RolLista[] }
 }
@@ -89,7 +90,7 @@ export async function listarArbolPermisos(): Promise<RespuestaLista<ModuloPermis
         .eq('es_activo', true)
         .order('orden', { ascending: true })
 
-    if (errorModulos) return { success: false, error: errorModulos.message }
+    if (errorModulos) return { success: false, error: describirError(errorModulos) }
 
     const { data: submodulos, error: errorSub } = await supabase
         .from('submodulos')
@@ -97,7 +98,7 @@ export async function listarArbolPermisos(): Promise<RespuestaLista<ModuloPermis
         .eq('es_activo', true)
         .order('orden', { ascending: true })
 
-    if (errorSub) return { success: false, error: errorSub.message }
+    if (errorSub) return { success: false, error: describirError(errorSub) }
 
     const porModulo = new Map<string, SubmoduloPermisos[]>()
     for (const s of (submodulos ?? []) as FilaSubmoduloCruda[]) {
@@ -253,7 +254,7 @@ export async function obtenerPermisosRol(clave: string): Promise<RespuestaLista<
         .select('submodulos(href), acciones(clave)')
         .eq('id_rol', rol.id)
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
 
     // Agrupar acciones por href. Solo las 5 del editor (aprobar queda oculta — R4).
     const mapa = new Map<string, string[]>()
@@ -290,7 +291,7 @@ export async function guardarPermisosRol(
         p_permisos: permisos,
     })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true }
 }
 
@@ -311,6 +312,6 @@ export async function restablecerPermisosRol(clave: string): Promise<RespuestaAc
         p_permisos: semilla,
     })
 
-    if (error) return { success: false, error: error.message }
+    if (error) return { success: false, error: describirError(error) }
     return { success: true }
 }

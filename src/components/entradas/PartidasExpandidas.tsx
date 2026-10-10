@@ -80,8 +80,12 @@ function Hito({ etiqueta, fecha }: { etiqueta: string; fecha: string | null }) {
 }
 
 /**
- * ⭐ Barra de PROPORCIÓN (no una barra por pieza): final vs DEV sobre lo declarado. El tramo
- * rojo lleva `minWidth` para que `−1 de 200` siga siendo visible sin exagerar la proporción.
+ * ⭐ Barra de PROPORCIÓN (no una barra por pieza): final vs DEV sobre **lo que la partida tiene**.
+ * El tramo rojo lleva `minWidth` para que `−1 de 200` siga siendo visible sin exagerar la proporción.
+ *
+ * ⭐ MEJORA 52-bis (08 Oct 2026 · decisión del dueño) — **se retiró el tramo de la reclasificación**:
+ * con `Recib.` = la verdad actual (el vigente), lo que salió por reclasificación **ya no está dentro
+ * del total** ⇒ no hay hueco que pintar. La barra queda verde (final) + rojo (DEV), como siempre.
  */
 function Proporcion({ final, dev, total }: { final: number; dev: number; total: number }) {
     const base = Math.max(total, final + dev, 1)
@@ -281,8 +285,8 @@ export function PartidasExpandidas({
                 vieja se corrige, no se borra. */}
             <div className={cn(
                 // ⭐ 05 Oct 2026 (dueño, fix de diseño) — LA TOOLBAR TIENE COLOR PROPIO: la tinta
-                // del módulo (g-primary-bg) y su borde, en vez del surface-raised que la dejaba
-                // casi del color del modal. Se separa del encabezado de la tabla (g-th) para que
+                // del módulo (`bg-primary-bg`) y su borde, en vez del surface-raised que la dejaba
+                // casi del color del modal. Se separa del encabezado de la tabla (`bg-th`) para que
                 // se lean como dos piezas, no como una banda sola.
                 'flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-primary/30 bg-primary-bg px-3 py-2.5 shadow-premium-sm',
                 // Z1 no se mueve: es la identidad y las puertas de la entrada que se está leyendo.
@@ -506,30 +510,46 @@ export function PartidasExpandidas({
                                                         <Proporcion
                                                             final={Number(p.cantidad_vigente)}
                                                             dev={devPartida}
-                                                            total={Number(p.cantidad_original)}
+                                                            total={Number(p.cantidad_vigente)}
                                                         />
                                                     </span>
                                                 </td>
-                                                <td className="px-2.5 py-2 text-center">
-                                                    {devPartida > 0 ? (
-                                                        <Pildora
-                                                            texto={
-                                                                p.dev_ajustada
-                                                                    ? 'Ajustada'
-                                                                    : 'Por cotejar'
-                                                            }
-                                                            tono={
-                                                                p.dev_ajustada ? 'listo' : 'advertencia'
-                                                            }
-                                                        />
-                                                    ) : (
-                                                        <Pildora
-                                                            texto={
-                                                                TEXTO_ESTADO_PARTIDA[p.estado_partida]
-                                                            }
-                                                            tono={TONO_PARTIDA[p.estado_partida]}
-                                                        />
-                                                    )}
+                                                <td className="px-2.5 py-2">
+                                                    {/* ⭐ MEJORA 52 — **y lo que ESPERA a Recepción.**
+                                                        El acto «Ajustar y nota» valida la reclasificación
+                                                        (`ajustada` + quién + cuándo), pero hasta ahora
+                                                        **no se veía** que hubiera algo por validar: esta
+                                                        píldora es esa señal, junto al estado del ajuste de
+                                                        la DEV (que ya existía). */}
+                                                    <span className="flex flex-wrap items-center justify-center gap-1">
+                                                        {devPartida > 0 ? (
+                                                            <Pildora
+                                                                texto={
+                                                                    p.dev_ajustada
+                                                                        ? 'Ajustada'
+                                                                        : 'Por cotejar'
+                                                                }
+                                                                tono={
+                                                                    p.dev_ajustada ? 'listo' : 'advertencia'
+                                                                }
+                                                            />
+                                                        ) : (
+                                                            <Pildora
+                                                                texto={
+                                                                    TEXTO_ESTADO_PARTIDA[p.estado_partida]
+                                                                }
+                                                                tono={TONO_PARTIDA[p.estado_partida]}
+                                                            />
+                                                        )}
+                                                        {p.reclasificadas_pendientes > 0 ? (
+                                                            <Pildora
+                                                                texto={`Reclas. por validar (${
+                                                                    p.reclasificadas_pendientes
+                                                                })`}
+                                                                tono="advertencia"
+                                                            />
+                                                        ) : null}
+                                                    </span>
                                                 </td>
                                                 <td className="px-2.5 py-2 text-center tabular-nums text-muted-foreground">
                                                     {formatearMXNEntrada(Number(p.costo_acordado))}

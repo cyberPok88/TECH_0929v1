@@ -190,7 +190,22 @@ export function NotaRemisionModal({ open, onOpenChange, onEmitida }: NotaRemisio
         (p) => info[p.id]?.hayLote === false && (Number(p.cantidad) || 0) > 0
     ).length
 
-    const listo = Boolean(borrador.id_cliente) && partidas.length > 0 && renglonesSinNS === 0
+    /**
+     * 🔴 FIX 09 Oct 2026 (decisión del dueño) — **EL NÚMERO DE SERIE YA NO BLOQUEA LA EMISIÓN.**
+     *
+     * *«Esto es un fix: cambia la política de NS — por ahorita **no será bloqueante** para hacer la
+     * nota»*. Antes: `listo = hayCliente && partidas > 0 && renglonesSinNS === 0`, y el servidor
+     * exigía lo mismo (`fn_emitir_nota_remision` hacía `RAISE` si las series capturadas no eran
+     * exactamente N). ⇒ **las dos mitades se retiraron juntas** (FIX-BD `g20_m8`): cambiar solo la
+     * pantalla habría dejado un botón que se pulsa y rebota en el servidor.
+     *
+     * ⚠️ **Los NS siguen siendo útiles y siguen amarrándose** (el rechazo del «ya vendido» y el
+     * `INSERT` en `series_partida` **quedan intactos**): lo que cambió es que su ausencia **ya no
+     * impide emitir**. El aviso de abajo pasó de **bloqueo** a **aviso**.
+     * ⏪ Es **temporal** y **reversible**: la regla vive escrita en `bd-ventas.md §8` y en
+     * `logica-negocio` (R30 **suspendida**).
+     */
+    const listo = Boolean(borrador.id_cliente) && partidas.length > 0
 
     const patchCabecera = (parcial: Partial<CamposCabecera>) =>
         setBorrador((b) => ({ ...b, ...parcial }))
@@ -365,8 +380,21 @@ export function NotaRemisionModal({ open, onOpenChange, onEmitida }: NotaRemisio
 
         toast.success(`Nota ${res.data?.folio} emitida.`)
         onEmitida()
-        cerrar(false)
-        onOpenChange(false)
+        /**
+         * 🔴 FIX 09 Oct 2026 (VF del dueño: *«al presionar emitir manda este error — ¿Descartar lo
+         * capturado? … pero sí genera la nota»*) — **ACÁ NO SE PREGUNTA NADA.**
+         *
+         * El defecto, medido: se llamaba `cerrar(false)`, que NO es «cerrá» sino **el handler de
+         * *«el usuario quiere cerrar»*** — y ese, si hay renglones capturados, **abre el diálogo de
+         * descarte**. O sea: la nota ya estaba emitida y el modal preguntaba si **descartar lo
+         * capturado**, con las cifras de algo que ya no existe que perder.
+         *
+         * ⇒ En la ruta de ÉXITO se limpia y se cierra **directo**: `descartar()` es exactamente eso
+         * (`setDescartarAbierto(false)` + `limpiar()` + `onOpenChange(false)`) y **ya no pregunta**.
+         * ⚠️ El `cerrar(...)` sigue siendo el correcto para las salidas del USUARIO (la ✕, el velo,
+         * Escape): ahí sí hay trabajo que perder.
+         */
+        descartar()
     }
 
     return (
@@ -532,9 +560,7 @@ export function NotaRemisionModal({ open, onOpenChange, onEmitida }: NotaRemisio
                                                 ? 'Elegí el cliente para empezar.'
                                                 : partidas.length === 0
                                                   ? 'Agregá al menos una partida.'
-                                                  : renglonesSinNS > 0
-                                                    ? `Faltan números de serie en ${renglonesSinNS} ${renglonesSinNS === 1 ? 'renglón' : 'renglones'}.`
-                                                    : undefined
+                                                  : undefined
                                         }
                                     >
                                         Revisar y emitir
@@ -542,17 +568,19 @@ export function NotaRemisionModal({ open, onOpenChange, onEmitida }: NotaRemisio
                                 </div>
                             </div>
 
-                            {/* ⚠️ EL BLOQUEO SE DICE (E1-⑧): no se esconde detrás de un botón gris.
-                                Es DATO + BANDERA ⇒ NO es una ayuda y no se puede apagar. */}
+                            {/* ⚠️ EL AVISO (ya NO es un bloqueo — FIX 09 Oct 2026 · `g20_m8`): el NS
+                                dejó de ser requisito para emitir. Sigue siendo DATO + BANDERA ⇒ no es
+                                una ayuda y no se puede apagar: dice cuántos renglones salen sin
+                                serial (o sea, sin trazabilidad por pieza). */}
                             {renglonesSinNS > 0 && (
                                 <p className="rounded-md border border-warning/45 bg-warning/10 px-3 py-2 text-[12.5px] text-warning">
                                     <b>
-                                        Faltan números de serie: {renglonesSinNS}{' '}
-                                        {renglonesSinNS === 1 ? 'renglón' : 'renglones'} sin
-                                        completar.
+                                        {renglonesSinNS}{' '}
+                                        {renglonesSinNS === 1 ? 'renglón sale' : 'renglones salen'} sin
+                                        números de serie.
                                     </b>{' '}
-                                    La nota no se emite hasta capturarlos todos — usá «Asignar NS»
-                                    en el renglón.
+                                    La nota <b>sí se puede emitir</b> así; podés capturarlos con
+                                    «Asignar NS» en el renglón para dejar la trazabilidad por pieza.
                                 </p>
                             )}
                         </div>

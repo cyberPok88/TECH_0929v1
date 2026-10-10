@@ -28,10 +28,17 @@ import { Button } from '@/components/ui/button'
 import { Pildora } from '@/components/data-table'
 import { usePageConfig } from '@/hooks/usePageConfig'
 import { consultarNumeroSerie } from '@/lib/actions/entradas'
-import type { ResultadoConsultaNs } from '@/types/entradas'
+import { capacidadTextoDesdeGb } from '@/lib/lector-discos'
+import type { LecturaNs, ResultadoConsultaNs } from '@/types/entradas'
 import { TEXTO_ESTADO_ENTRADA } from '@/types/entradas'
 
 const RUTA = '/dashboard/entradas/alta/ns'
+
+/** Un número de la lectura, con su sufijo; `—` cuando el agente no lo trajo. */
+function num(v: number | null | undefined, sufijo = ''): string {
+    if (v === null || v === undefined) return '—'
+    return `${v}${sufijo}`
+}
 
 /** La fecha del concentrado, en corto: es una constancia, no un campo de captura. */
 function formatearFecha(fecha: string | undefined): string {
@@ -45,6 +52,100 @@ function formatearFecha(fecha: string | undefined): string {
         hour: '2-digit',
         minute: '2-digit',
     })
+}
+
+/**
+ * ⭐ MEJORA 52 (07 Oct 2026) — **LA LECTURA DEL DISCO, en la pantalla del NS.**
+ *
+ * Lo pidió el dueño con estas palabras: *«si queremos saber datos de un dato específico se escanea
+ * el NS y nos muestra **los 40 datos de la lectura**»*. Hasta ahora la pantalla solo contaba **de qué
+ * entrada vino**; esto cuenta **cómo está la pieza**.
+ *
+ * Ordenado como se decide: ① **la salud** (es lo que decide PASA/NO PASA) · ② **la capacidad MEDIDA**
+ * (la verdad de la pieza: si no coincide con lo declarado, es el caso de reclasificación) ·
+ * ③ el desgaste (valúa) · ④ el daño · ⑤ la identidad del disco · ⑥ **el payload crudo**, plegado,
+ * porque es evidencia auditable y no una pantalla.
+ */
+function BloqueLectura({ lectura }: { lectura: LecturaNs }) {
+    const sinAval = lectura.apto_para_decidir === false
+    const crudo = lectura.cruda as Record<string, unknown> | null
+    return (
+        <div className="space-y-3 border-t border-border pt-3">
+            <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-[11px] uppercase tracking-[0.09em] text-muted-foreground">
+                    La lectura del disco
+                </span>
+                <Pildora
+                    texto={`${lectura.salud_veredicto ?? 'sin veredicto'}${
+                        lectura.salud_puntaje !== null ? ` · ${lectura.salud_puntaje} %` : ''
+                    }`}
+                    tono={lectura.apto ? 'exito' : 'peligro'}
+                />
+                {sinAval ? <Pildora texto="SIN AVAL · lo decide el técnico" tono="advertencia" /> : null}
+                {lectura.requiere_revision ? (
+                    <Pildora texto="Requiere revisión" tono="advertencia" />
+                ) : null}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Dato etiqueta="Capacidad MEDIDA">
+                    <span className="font-semibold">
+                        {lectura.capacidad_gb !== null ? capacidadTextoDesdeGb(lectura.capacidad_gb) : '—'}
+                    </span>
+                </Dato>
+                <Dato etiqueta="Horas de uso">{num(lectura.horas_uso)}</Dato>
+                <Dato etiqueta="Encendidos">{num(lectura.encendidos)}</Dato>
+                <Dato etiqueta="Temperatura">{num(lectura.temperatura_c, ' °C')}</Dato>
+                <Dato etiqueta="Modelo">{lectura.modelo ?? '—'}</Dato>
+                <Dato etiqueta="Firmware">{lectura.firmware ?? '—'}</Dato>
+                <Dato etiqueta="Interfaz">
+                    {lectura.interfaz ?? '—'}
+                    {lectura.es_nvme ? ' · NVMe' : ''}
+                </Dato>
+                <Dato etiqueta="RPM">{num(lectura.rpm)}</Dato>
+                <Dato etiqueta="Reasignados">{num(lectura.sectores_reasignados)}</Dato>
+                <Dato etiqueta="Pendientes">{num(lectura.sectores_pendientes)}</Dato>
+                <Dato etiqueta="No corregibles">{num(lectura.sectores_no_corregibles)}</Dato>
+                <Dato etiqueta="Errores CRC">{num(lectura.errores_crc)}</Dato>
+                <Dato etiqueta="Marca que detectó el agente">
+                    {lectura.marca_detectada ?? '—'}
+                    {lectura.marca_confianza ? ` · ${lectura.marca_confianza}` : ''}
+                </Dato>
+                <Dato etiqueta="Leído">{formatearFecha(lectura.leido_el)}</Dato>
+                <Dato etiqueta="Motor">{lectura.motor ?? '—'}</Dato>
+                <Dato etiqueta="NS de Windows">{lectura.ns_windows ?? '—'}</Dato>
+            </div>
+
+            {lectura.salud_motivos && lectura.salud_motivos.length > 0 ? (
+                <details className="rounded-md border border-border bg-surface-2 px-3 py-2">
+                    <summary className="cursor-pointer text-[12.5px] font-medium">
+                        Por qué esa salud ({lectura.salud_motivos.length})
+                    </summary>
+                    <ul className="mt-1.5 list-disc space-y-1 pl-4 text-[12.5px] text-muted-foreground">
+                        {lectura.salud_motivos.map((m, i) => (
+                            <li key={i}>{m}</li>
+                        ))}
+                    </ul>
+                </details>
+            ) : null}
+
+            {crudo ? (
+                <details className="rounded-md border border-border bg-surface-2 px-3 py-2">
+                    <summary className="cursor-pointer text-[12.5px] font-medium">
+                        La lectura completa (evidencia)
+                    </summary>
+                    <p className="mt-1.5 text-[12px] text-muted-foreground">
+                        El agente manda más de lo que esta pantalla necesita: acá está <b>tal cual</b>,
+                        incluida la <b>fuente de la salud</b> (HDSentinel, el propio disco o la fórmula de
+                        la casa) y <b>si la lectura quedó incompleta</b>.
+                    </p>
+                    <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-2 font-mono text-[11px] leading-relaxed">
+                        {JSON.stringify(crudo, null, 2)}
+                    </pre>
+                </details>
+            ) : null}
+        </div>
+    )
 }
 
 /** Un dato del resultado, con su etiqueta arriba (el idioma del puesto). */
@@ -219,6 +320,22 @@ export function ControlNsCatalogo() {
                         <Dato etiqueta="Escaneado">{formatearFecha(resultado.capturado_at)}</Dato>
                         <Dato etiqueta="Lo firmó">{resultado.capturado_por ?? '—'}</Dato>
                     </div>
+
+                    {/* ── ⭐ MEJORA 52 · LA LECTURA DE LA PIEZA ─────────────────────────────
+                        El NS es la LLAVE y esto es **el archivo de la pieza**: lo que el agente
+                        le tomó al disco cuando se revisó. Es lo que se viene a ver cuando se
+                        escanea un serial: qué disco es, cómo está y cuánto se usó.
+                        Es `lecturas_disco` (append-only): si el disco se leyó dos veces, acá
+                        se ve la ÚLTIMA y las anteriores quedan como historia. */}
+                    {resultado.lectura ? (
+                        <BloqueLectura lectura={resultado.lectura} />
+                    ) : (
+                        <p className="border-t border-border pt-3 text-[12.5px] text-muted-foreground">
+                            <b className="text-foreground">Sin lectura.</b> Esta pieza se revisó sin el
+                            lector (o es de una categoría que no tiene SMART, como la RAM): su
+                            identidad se capturó a mano y no hay ficha del disco.
+                        </p>
+                    )}
 
                     {/* ── el producto: por PARTIDA, que es el nivel que sí lo sabe ── */}
                     <div className="border-t border-border pt-3">
