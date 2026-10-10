@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ⚠️ El gestor de paquetes de ESTE repo es npm (package-lock.json, versionado desde el 1er commit
+# y en sync con package.json). Estos dos archivos entraron por error en el commit 7c3a1af: Vercel
+# detecta `pnpm-lock.yaml` ANTES que `package-lock.json`, cambia de gestor e instala con
+# `--frozen-lockfile` ⇒ el build muere con ERR_PNPM_OUTDATED_LOCKFILE porque los `specifier` del
+# lockfile (versiones peladas: `1.1.23`) no coinciden con los rangos de package.json (`^1.1.23`).
+# Si algún día se migra a pnpm de verdad, esto se saca y se regenera el lockfile con `pnpm install`.
+pnpm-lock.yaml
+pnpm-workspace.yaml
